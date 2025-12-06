@@ -45,6 +45,14 @@ internal class EventManager : Bus {
      * Holds utilities and shared logger for the event system.
      */
     companion object {
+        /**
+         * Shared logger instance used for reporting reflection failures,
+         * lambda generation issues, and other internal runtime diagnostics.
+         *
+         * This logger is intentionally private to avoid exposing implementation
+         * details to API consumers while still providing meaningful debug
+         * information during event processing.
+         */
         private val logger = LoggerFactory.getLogger(EventManager::class.java)
         /**
          * Validates whether a method qualifies as an event handler.
