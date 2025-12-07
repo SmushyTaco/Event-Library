@@ -16,6 +16,7 @@
 
 package com.smushytaco.event_library.api
 
+import com.smushytaco.event_library.api.Modifiable.Companion.invoke
 import com.smushytaco.event_library.internal.ModifiableImpl
 
 /**

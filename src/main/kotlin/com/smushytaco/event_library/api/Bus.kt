@@ -16,7 +16,9 @@
 
 package com.smushytaco.event_library.api
 
+import com.smushytaco.event_library.api.Bus.Companion.invoke
 import com.smushytaco.event_library.internal.EventManager
+import kotlin.reflect.KClass
 
 /**
  * Represents an event bus capable of registering subscribers and dispatching events
@@ -67,6 +69,54 @@ interface Bus {
      * @param any the subscriber to remove.
      */
     fun unsubscribe(any: Any)
+    /**
+     * Registers a class containing **static event handler methods**.
+     *
+     * All `static` functions within the class annotated with [EventHandler] and
+     * accepting exactly one parameter of type [Event] (or its subtype) will be
+     * discovered and registered automatically.
+     *
+     * Unlike instance-based subscription:
+     * - Static handlers do not require an object instance.
+     * - Their lifetime persists until explicitly unregistered via [unsubscribeStatic].
+     * - They are not subject to weak-reference cleanup.
+     *
+     * @param type the class containing static handler methods to register.
+     */
+    fun subscribeStatic(type: Class<*>)
+    /**
+     * Registers a class containing **static event handler methods**.
+     *
+     * All `static` functions within the class annotated with [EventHandler] and
+     * accepting exactly one parameter of type [Event] (or its subtype) will be
+     * discovered and registered automatically.
+     *
+     * Unlike instance-based subscription:
+     * - Static handlers do not require an object instance.
+     * - Their lifetime persists until explicitly unregistered via [unsubscribeStatic].
+     * - They are not subject to weak-reference cleanup.
+     *
+     * @param type the class containing static handler methods to register.
+     */
+    fun subscribeStatic(type: KClass<*>) = subscribeStatic(type.java)
+    /**
+     * Unregisters all static event handlers declared within the given class.
+     *
+     * Only handlers previously registered via [subscribeStatic] will be removed.
+     * If the class was not registered, this operation has no effect.
+     *
+     * @param type the class whose static handler methods should be unregistered.
+     */
+    fun unsubscribeStatic(type: Class<*>)
+    /**
+     * Unregisters all static event handlers declared within the given class.
+     *
+     * Only handlers previously registered via [subscribeStatic] will be removed.
+     * If the class was not registered, this operation has no effect.
+     *
+     * @param type the class whose static handler methods should be unregistered.
+     */
+    fun unsubscribeStatic(type: KClass<*>) = unsubscribeStatic(type.java)
     /**
      * Posts an event to all matching subscribers.
      *

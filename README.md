@@ -129,7 +129,6 @@ bus.unsubscribe(subscriber)
 Must satisfy:
 
 - Annotated with `@EventHandler`
-- Not static
 - Takes exactly **one** subtype of `Event`
 - Returns `Unit`
 
@@ -166,10 +165,9 @@ It gathers **non-bridge**, **non-synthetic** declared methods.
 A method must:
 
 1. Be annotated with `@EventHandler`
-2. Not be static
-3. Return `void`/`Unit`
-4. Take exactly one parameter
-5. The parameter type must implement `Event`
+2. Return `void`/`Unit`
+3. Take exactly one parameter
+4. The parameter type must implement `Event`
 
 ### Invocation Strategy
 
@@ -234,6 +232,69 @@ bus.post(event)
 
 println("Modified: ${event.modified}")
 ```
+
+---
+
+## 🧲 Static Handler Support
+
+In addition to instance-based subscribers, the event bus can also register **static event handler methods**.
+
+Static handlers must:
+
+- Be annotated with `@EventHandler`
+- Be declared `static` (or `@JvmStatic` in a Kotlin `companion object`)
+- Accept exactly one `Event` subtype parameter
+- Return `Unit`
+
+### 📥 Registering Static Handlers
+
+```kotlin
+class GlobalHandlers {
+    @JvmStatic
+    @EventHandler(priority = 5)
+    fun onGlobal(event: SomeEvent) {
+        println("Static handler fired!")
+    }
+}
+
+// Register
+bus.subscribeStatic(GlobalHandlers::class)
+```
+
+### 📤 Unregistering Static Handlers
+
+```kotlin
+bus.unsubscribeStatic(GlobalHandlers::class)
+```
+
+### 🧪 Example: Static + Instance Together
+
+```kotlin
+class MixedHandlers {
+    @EventHandler
+    fun instanceHandler(event: SomeEvent) {
+        println("Instance handler")
+    }
+
+    companion object {
+        @JvmStatic
+        @EventHandler
+        fun staticHandler(event: SomeEvent) {
+            println("Static handler")
+        }
+    }
+}
+
+bus.subscribe(MixedHandlers())
+bus.subscribeStatic(MixedHandlers.Companion::class)
+
+bus.post(SomeEvent())
+// Output:
+// Static handler
+// Instance handler
+```
+
+Static handlers remain active until explicitly unregistered because they are not weak-referenced.
 
 ---
 

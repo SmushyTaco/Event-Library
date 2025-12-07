@@ -16,8 +16,11 @@
 
 package com.smushytaco.event_library
 
-import com.smushytaco.event_library.api.*
-import org.junit.jupiter.api.Assertions.*
+import com.smushytaco.event_library.api.Cancelable
+import com.smushytaco.event_library.api.Event
+import com.smushytaco.event_library.api.Modifiable
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 private class CompositeEvent :

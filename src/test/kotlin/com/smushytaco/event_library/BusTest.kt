@@ -18,7 +18,10 @@
 
 package com.smushytaco.event_library
 
-import com.smushytaco.event_library.api.*
+import com.smushytaco.event_library.api.Bus
+import com.smushytaco.event_library.api.Cancelable
+import com.smushytaco.event_library.api.Event
+import com.smushytaco.event_library.api.EventHandler
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 

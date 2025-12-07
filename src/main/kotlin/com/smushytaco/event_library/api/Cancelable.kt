@@ -16,6 +16,7 @@
 
 package com.smushytaco.event_library.api
 
+import com.smushytaco.event_library.api.Cancelable.Companion.invoke
 import com.smushytaco.event_library.internal.CancelableImpl
 
 /**
