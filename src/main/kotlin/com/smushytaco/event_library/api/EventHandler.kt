@@ -24,7 +24,6 @@ package com.smushytaco.event_library.api
  * - Be annotated with [EventHandler].
  * - Accept exactly one parameter whose type implements [Event].
  * - Have a `void`/`Unit` return type.
- * - Not be static.
  *
  * Event handlers may be registered by passing the containing object to
  * [Bus.subscribe]. The event bus automatically discovers annotated methods

@@ -16,6 +16,7 @@
 
 package com.smushytaco.event_library.internal
 
+import com.github.benmanes.caffeine.cache.Caffeine
 import com.smushytaco.event_library.api.Bus
 import com.smushytaco.event_library.api.Cancelable
 import com.smushytaco.event_library.api.Event
@@ -33,8 +34,6 @@ import java.lang.invoke.MethodType
 import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
-import java.util.WeakHashMap
-import kotlin.collections.ArrayDeque
 
 /**
  * Internal implementation of the [Bus] interface responsible for:
@@ -157,7 +156,7 @@ internal class EventManager : Bus {
                     factory.invokeExact() as InstanceEventInvoker
                 }
             } catch (t: Throwable) {
-                logger.error("Failed to create lambda invoker for ${method.declaringClass.name}#${method.name}, falling back to reflection.", t)
+                logger.warn("Failed to create lambda invoker for ${method.declaringClass.name}#${method.name}, falling back to reflection.", t)
                 if (isStatic) {
                     StaticEventInvoker { event ->
                         method.invoke(null, event)
@@ -186,7 +185,24 @@ internal class EventManager : Bus {
      * Keys are weak references, allowing automatic cleanup when subscribers
      * become unreachable.
      */
-    private val objectEventMap: MutableMap<Any, MutableList<Class<out Event>>> = WeakHashMap()
+    private val objectEventMap = Caffeine.newBuilder()
+        .weakKeys()
+        .removalListener<Any, MutableList<Class<out Event>>> { _, events, _ ->
+            if (events != null) {
+                synchronized(lock) {
+                    var hasRemovedAnything = false
+                    for (eventClass in events) {
+                        methodCache[eventClass]?.removeIf { handler ->
+                            val condition = handler is InstanceHandler && handler.target.get() == null
+                            if (condition) hasRemovedAnything = true
+                            condition
+                        }
+                    }
+                    if (hasRemovedAnything) resolvedCache.clear()
+                }
+            }
+        }
+        .build<Any, MutableList<Class<out Event>>>()
     /**
      * Tracks which event types each static subscriber class handles.
      *
@@ -210,7 +226,7 @@ internal class EventManager : Bus {
 
     override fun subscribe(any: Any) {
         synchronized(lock) {
-            if (objectEventMap.containsKey(any)) return
+            if (objectEventMap.getIfPresent(any) != null) return
 
             val klass = any::class.java
 
@@ -241,14 +257,15 @@ internal class EventManager : Bus {
 
     override fun unsubscribe(any: Any) {
         synchronized(lock) {
-            objectEventMap[any]?.forEach { eventClass ->
+            val eventClasses = objectEventMap.getIfPresent(any) ?: return
+            eventClasses.forEach { eventClass ->
                 methodCache[eventClass]?.removeIf {
                     if (it !is InstanceHandler) return@removeIf false
                     val target = it.target.get()
                     target == null || target === any
                 }
             }
-            objectEventMap.remove(any)
+            objectEventMap.invalidate(any)
             resolvedCache.clear()
         }
     }
@@ -287,7 +304,8 @@ internal class EventManager : Bus {
 
     override fun unsubscribeStatic(type: Class<*>) {
         synchronized(lock) {
-            staticEventMap[type]?.forEach { eventClass ->
+            val eventClasses = staticEventMap[type] ?: return
+            eventClasses.forEach { eventClass ->
                 methodCache[eventClass]?.removeIf {
                     it is StaticHandler && it.owner == type
                 }
@@ -317,9 +335,7 @@ internal class EventManager : Bus {
                         val target = handler.target.get() ?: continue
                         handler.invoker(target, event)
                     }
-                    is StaticHandler -> {
-                        handler.invoker(event)
-                    }
+                    is StaticHandler -> handler.invoker(event)
                 }
             } catch (e: Exception) {
                 logger.error("Failed to invoke handler for event: ${event::class.simpleName}", e)
@@ -357,7 +373,11 @@ internal class EventManager : Bus {
             list.add(index, handler)
         }
         any?.let {
-            objectEventMap.getOrPut(it) { mutableListOf() }.add(eventClass)
+            val list = objectEventMap.getIfPresent(it)
+                ?: mutableListOf<Class<out Event>>().also { newList ->
+                    objectEventMap.put(it, newList)
+                }
+            list.add(eventClass)
             return
         }
         type?.let {
@@ -385,14 +405,8 @@ internal class EventManager : Bus {
             if (!seen.add(current)) continue
 
             @Suppress("UNCHECKED_CAST")
-            val handlers = methodCache[current as Class<out Event>]
-            if (handlers != null) {
-                handlers.removeIf {
-                    if (it !is InstanceHandler) return@removeIf false
-                    it.target.get() == null
-                }
-                result.addAll(handlers)
-            }
+            val handlers: List<Handler>? = methodCache[current as Class<out Event>]
+            if (handlers != null) result.addAll(handlers)
 
             current.superclass
                 ?.takeIf { Event::class.java.isAssignableFrom(it) }

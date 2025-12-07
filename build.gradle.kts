@@ -39,6 +39,7 @@ repositories { mavenCentral() }
 
 dependencies {
 	implementation(libs.slf4j.api)
+	implementation(libs.caffeine)
 	testRuntimeOnly(libs.slf4j.simple)
 	testImplementation(kotlin("test"))
 	testImplementation(libs.junit.jupiter)
