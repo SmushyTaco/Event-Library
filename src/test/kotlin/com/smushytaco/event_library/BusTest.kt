@@ -170,7 +170,7 @@ class BusTest {
         val event = CancelableEvent()
 
         bus.subscribe(subscriber)
-        bus.post(event) // respectCancels defaults to false
+        bus.post(event)
 
         assertEquals(listOf("first", "second"), subscriber.calls,
             "Both handlers should run when respectCancels=false")

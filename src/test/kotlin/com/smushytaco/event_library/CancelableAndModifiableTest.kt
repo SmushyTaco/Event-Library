@@ -52,7 +52,6 @@ class CancelableAndModifiableTest {
     fun `event can delegate to Cancelable and Modifiable`() {
         val event = CompositeEvent()
 
-        // Initially neither canceled nor modified
         assertFalse(event.canceled, "Delegated Cancelable should start as not canceled")
         assertFalse(event.modified, "Delegated Modifiable should start as not modified")
 

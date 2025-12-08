@@ -25,7 +25,11 @@ package com.smushytaco.event_library.api
  * Exception handlers allow subscribers to react to failures in a structured,
  * type-safe, and prioritized manner.
  *
+ * Handlers may be either instance methods (discovered via [Bus.subscribe]) or
+ * static / `@JvmStatic` methods (discovered via [Bus.subscribeStatic]).
+ *
  * ## Supported method signatures
+ *
  * An exception handler may declare one of the following parameter shapes:
  *
  * - **`(event: E, throwable: T)`**
@@ -41,11 +45,18 @@ package com.smushytaco.event_library.api
  * These signatures give fine-grained control over which failures a method
  * handles, allowing handlers to be as broad or specific as needed.
  *
- * ## Priority
+ * ## Priority & ordering
  *
  * When multiple exception handlers match a thrown exception, they are all
  * invoked in order of descending [priority]. Handlers with higher `priority`
  * values run before those with lower values.
+ *
+ * For handlers sharing the same [priority], the bus prefers more specific
+ * signatures:
+ *
+ * 1. `(event: E, throwable: T)` — most specific.
+ * 2. `(event: E)` — event-scoped catch-alls.
+ * 3. `(throwable: T)` — throwable-only observers.
  *
  * @property priority the execution priority of this exception handler.
  * Higher values run earlier. Defaults to `0`.

@@ -2,22 +2,24 @@
 [![Maven Central](https://img.shields.io/maven-central/v/com.smushytaco/event-library.svg?label=maven%20central)](https://central.sonatype.com/artifact/com.smushytaco/event-library)
 [![Dokka Docs](https://img.shields.io/badge/docs-dokka-brightgreen.svg)](https://smushytaco.github.io/Event-Library)
 
-A lightweight, reflection‑assisted but LambdaMetafactory‑accelerated event bus for Kotlin and JVM.  
+A lightweight, reflection‑assisted but LambdaMetafactory‑accelerated event bus for Kotlin and the JVM.  
 This library focuses on **simplicity**, **performance**, and **zero boilerplate**, while supporting:
 
 - Private, protected, internal, or public handler methods
 - Handler prioritization
-- Cancelable events
-- Modifiable events
+- Cancelable and modifiable events
 - Weak subscriber references (automatic cleanup)
 - Polymorphic dispatch (handlers for supertype events receive subtype events)
 - High‑performance invocation using `LambdaMetafactory`, with reflective fallback
+- Static handlers for both events and exceptions
+- Typed, prioritized exception handling via `@ExceptionHandler`
 
 ---
 
 ## ✨ Features
 
 ### 🔍 Automatic Handler Discovery
+
 Any method annotated with `@EventHandler` and accepting exactly one `Event` parameter is treated as a handler.
 
 ```kotlin
@@ -29,27 +31,89 @@ class ExampleSubscriber {
 }
 ```
 
+Handlers can be `private`, `protected`, `internal`, or `public`. The bus discovers them via reflection and turns them into fast call sites.
+
+### 🧯 Structured Exception Handling with `@ExceptionHandler`
+
+When an `@EventHandler` throws, the bus does **not** crash your application by default.  
+Instead, it dispatches the failure to matching `@ExceptionHandler` methods, which can be:
+
+- instance methods on subscribers, or
+- static methods (`static` in Java, `@JvmStatic` in Kotlin)
+
+Supported signatures:
+
+```kotlin
+// 1) Event + Throwable: most specific
+@ExceptionHandler
+fun onFailure(event: MyEvent, t: IOException) { /* ... */ }
+
+// 2) Event only: any exception for this event type
+@ExceptionHandler
+fun onAnyFailure(event: MyEvent) { /* ... */ }
+
+// 3) Throwable only: this exception type for any event
+@ExceptionHandler
+fun onAnyIOException(t: IOException) { /* ... */ }
+```
+
+Matching is **polymorphic** in both directions:
+
+- Event parameter can be a supertype of the actual event (`BaseEvent` handler sees `ChildEvent` failures).
+- Throwable parameter can be a supertype of the actual throwable (`Exception` handler sees `IOException`).
+
+Ordering rules for exception handlers:
+
+1. **Priority** (higher `priority` runs first).
+2. **Specificity** at the same priority:
+    - event + throwable
+    - event‑only
+    - throwable‑only
+3. Within the same priority **and** same specificity, registration order is preserved.
+
+If **no** exception handler ends up handling a throwable:
+
+- `Exception` (and subclasses) → logged via SLF4J and swallowed.
+- `Error` (and other non‑`Exception` throwables) → rethrown.
+
+If an exception handler itself throws, that exception is **not** re‑handled by the bus and will propagate out of `post(...)`.
+
 ### 🚀 High‑Performance Invocation
-If possible, the library compiles handlers into fast invokedynamic lambdas.  
-If the JVM blocks access (module restrictions, visibility, etc.), it automatically falls back to reflection.
+
+Wherever possible, handler and exception invokers are compiled into fast lambdas using `LambdaMetafactory`.  
+If this isn’t possible (module visibility, access rules, security manager, etc.), the system falls back to reflection and logs the failure, but behavior remains correct.
 
 ### 🧹 Weak Subscriber References
-Subscribers are held via `WeakReference`, meaning they are automatically removed when garbage‑collected.
+
+Instance subscribers are stored via `WeakReference`. When a subscriber becomes unreachable, its handlers are automatically pruned:
+
+- No memory leaks from forgotten `unsubscribe` calls.
+- Caches are invalidated when stale handlers are removed.
 
 ### 🛑 Cancelable Events
-Event propagation can be interrupted via:
+
+Events can opt into cancellation:
 
 ```kotlin
 class ExampleEvent : Event, Cancelable by Cancelable()
 
 @EventHandler
 fun onExample(event: ExampleEvent) {
+    // Stop further processing
     event.markCanceled()
 }
 ```
 
-### 🔧 Modifiable Events
-Events can indicate that handlers modified their state:
+When posting, choose whether cancellation should be enforced:
+
+```kotlin
+bus.post(event, respectCancels = true)  // stops once canceled
+bus.post(event)                         // ignores cancel flag
+```
+
+### ✏️ Modifiable Events
+
+Events can advertise that their state was modified by handlers:
 
 ```kotlin
 class ExampleEvent : Event, Modifiable by Modifiable()
@@ -59,6 +123,43 @@ fun onEdit(event: ExampleEvent) {
     event.markModified()
 }
 ```
+
+Consumers can then react conditionally:
+
+```kotlin
+bus.post(event)
+if (event.modified) {
+    // Persist / recompute / update caches
+}
+```
+
+### 🧲 Static Handler Support (Events & Exceptions)
+
+You can declare global, static handlers on classes or Kotlin `object` / `companion object` members using `@JvmStatic`:
+
+```kotlin
+class StaticHandlers {
+    companion object {
+        @JvmStatic
+        @EventHandler(priority = 10)
+        fun onEvent(event: SomeEvent) { /* ... */ }
+
+        @JvmStatic
+        @ExceptionHandler
+        fun onFailure(event: SomeEvent, t: Throwable) { /* ... */ }
+    }
+}
+```
+
+Register and unregister them via `subscribeStatic` / `unsubscribeStatic`:
+
+```kotlin
+bus.subscribeStatic(StaticHandlers::class)
+bus.post(SomeEvent())
+bus.unsubscribeStatic(StaticHandlers::class)
+```
+
+Static handlers are strongly referenced and remain active until explicitly unregistered.
 
 ---
 
@@ -75,7 +176,7 @@ And the following to your `gradle/libs.versions.toml`:
 ```toml
 [versions]
 # Check this on https://central.sonatype.com/artifact/com.smushytaco/event-library/
-eventLibrary = "2.0.1"
+eventLibrary = "3.0.0"
 
 [libraries]
 eventLibrary = { group = "com.smushytaco", name = "event-library", version.ref = "eventLibrary" }
@@ -86,32 +187,33 @@ eventLibrary = { group = "com.smushytaco", name = "event-library", version.ref =
 ## 🧠 Key Concepts
 
 ### Bus
+
 The `Bus` interface is the core dispatch system.  
-Users simply call:
+You typically create an instance via the companion factory:
 
 ```kotlin
-val bus = Bus()
+val bus = Bus() // returns an internal EventManager
 ```
 
-This invokes the factory inside the companion object and returns an internal `EventManager` instance.
-
 ### Events
+
 Any class implementing `Event` qualifies:
 
 ```kotlin
 class MyEvent : Event
 ```
 
-Optional behavior is available by delegation:
+Optional behaviors via delegation:
 
 ```kotlin
-class EditableEvent :
+class RichEvent :
     Event,
     Cancelable by Cancelable(),
     Modifiable by Modifiable()
 ```
 
 ### Subscribers
+
 Any object can subscribe:
 
 ```kotlin
@@ -119,182 +221,150 @@ val subscriber = MySubscriber()
 bus.subscribe(subscriber)
 ```
 
-Unsubscribe:
+Unsubscribe when you’re done (though weak references will also clean up once the object is GC’d):
 
 ```kotlin
 bus.unsubscribe(subscriber)
 ```
 
-### Handler Methods
-Must satisfy:
+### Event Handlers (`@EventHandler`)
+
+Requirements:
 
 - Annotated with `@EventHandler`
-- Takes exactly **one** subtype of `Event`
-- Returns `Unit`
+- Exactly one parameter, implementing `Event`
+- `Unit` / `void` return type
 
-Handlers may be:
-- private
-- internal
-- protected
-- public
-
-The library supports all visibility levels.
-
-### Handler Priority
-Higher priority runs earlier:
+Example:
 
 ```kotlin
-@EventHandler(priority = 10)
-fun important(event: ExampleEvent)
-```
-
----
-
-## 🧬 Internals
-
-### Method Discovery
-The bus scans:
-
-- The class
-- All superclasses
-- All interfaces
-
-It gathers **non-bridge**, **non-synthetic** declared methods.
-
-### Handler Validation
-A method must:
-
-1. Be annotated with `@EventHandler`
-2. Return `void`/`Unit`
-3. Take exactly one parameter
-4. The parameter type must implement `Event`
-
-### Invocation Strategy
-
-#### 1. Try to create a LambdaMetafactory‑backed `EventInvoker`:
-
-- Uses `MethodHandles.privateLookupIn` (Java 9+)
-- Falls back to default lookup if private lookup fails
-- If any step fails → go to fallback
-
-#### 2. Reflection fallback
-Guaranteed to work even if:
-
-- Class is private
-- Method is private
-- Security manager blocks invokedynamic
-- Module boundaries disallow deep access
-
-### Handler Resolution
-When an event is posted, the bus:
-
-1. Looks up handlers for the event type
-2. Walks its superclasses and interfaces
-3. Combines all handlers
-4. Sorts by priority
-5. Caches the resulting list
-
-Cache invalidates whenever new subscribers subscribe or unsubscribe.
-
----
-
-## 📖 Example Usage
-
-### Define event:
-
-```kotlin
-class MessageEvent(val msg: String) :
-    Event, Modifiable by Modifiable()
-```
-
-### Define subscriber:
-
-```kotlin
-class MessageListener {
+class MySubscriber {
     @EventHandler(priority = 5)
-    private fun onMessage(event: MessageEvent) {
-        println("Received: ${event.msg}")
-        event.markModified()
+    private fun onMyEvent(event: MyEvent) {
+        println("Got event: $event")
     }
 }
 ```
 
-### Fire event:
+Handlers are invoked in **descending priority** order. For event handlers, handlers with the same priority are invoked in the order they were effectively registered.
+
+### Exception Handlers (`@ExceptionHandler`)
+
+Exception handlers live on the same subscriber types as event handlers and follow the same priority rules, but with the three supported shapes:
+
+```kotlin
+class MySubscriber {
+
+    @EventHandler
+    fun onMyEvent(event: MyEvent) {
+        // This might throw
+        riskyOperation()
+    }
+
+    // Specific event + throwable
+    @ExceptionHandler(priority = 10)
+    fun onMyEventFailure(event: MyEvent, t: IllegalStateException) {
+        println("MyEvent failed with illegal state: ${t.message}")
+    }
+
+    // Event-only catch-all
+    @ExceptionHandler
+    fun onAnyMyEventFailure(event: MyEvent) {
+        println("MyEvent failed with some exception")
+    }
+
+    // Throwable-only global handler
+    @ExceptionHandler(priority = -10)
+    fun onAnyException(t: Exception) {
+        println("Some handler somewhere threw: ${t.message}")
+    }
+}
+```
+
+The bus calls *all* matching exception handlers (unless one of them throws), ordered by priority and specificity.
+
+---
+
+## 📖 End-to-End Example
+
+### 1. Define an event
+
+```kotlin
+class MessageEvent(val text: String) :
+    Event,
+    Cancelable by Cancelable(),
+    Modifiable by Modifiable()
+```
+
+### 2. Define a subscriber with event + exception handlers
+
+```kotlin
+class MessageSubscriber {
+
+    @EventHandler(priority = 10)
+    fun onMessage(event: MessageEvent) {
+        println("Handling message: ${event.text}")
+        if (event.text.contains("stop", ignoreCase = true)) {
+            event.markCanceled()
+        }
+
+        if (event.text.contains("boom", ignoreCase = true)) {
+            throw IllegalArgumentException("Boom!")
+        }
+
+        event.markModified()
+    }
+
+    @EventHandler(priority = 0)
+    fun after(event: MessageEvent) {
+        println("Second handler: ${event.text}")
+    }
+
+    @ExceptionHandler
+    fun onMessageFailure(event: MessageEvent, t: IllegalArgumentException) {
+        println("Message handler failed: ${t.message}")
+    }
+
+    @ExceptionHandler
+    fun onAnyMessageFailure(event: MessageEvent) {
+        println("Some exception happened while handling a MessageEvent.")
+    }
+}
+```
+
+### 3. Wire it together
 
 ```kotlin
 val bus = Bus()
-val listener = MessageListener()
+val subscriber = MessageSubscriber()
 
-bus.subscribe(listener)
+bus.subscribe(subscriber)
 
-val event = MessageEvent("Hello")
-bus.post(event)
+val event = MessageEvent("Hello, boom world")
+bus.post(event, respectCancels = true)
 
-println("Modified: ${event.modified}")
+println("Canceled?  ${event.canceled}")
+println("Modified? ${event.modified}")
 ```
+
+This will:
+
+1. Invoke `onMessage`.
+2. Throw `IllegalArgumentException` → dispatch to `@ExceptionHandler` methods.
+3. Continue to `after` **only if** the event is not canceled and exception handlers didn’t throw.
+4. Allow you to inspect `event.canceled` and `event.modified` after dispatch.
 
 ---
 
-## 🧲 Static Handler Support
+## 🧬 Internals (High-Level)
 
-In addition to instance-based subscribers, the event bus can also register **static event handler methods**.
+- Uses reflection **once** at subscription time to discover handlers.
+- Compiles handlers into fast lambdas using `LambdaMetafactory` when possible.
+- Falls back to reflection if needed, while preserving correctness.
+- Caches resolved handler lists per event type (including supertypes/interfaces) for both events and exceptions.
+- Automatically prunes handlers whose subscriber instances have been garbage‑collected.
 
-Static handlers must:
-
-- Be annotated with `@EventHandler`
-- Be declared `static` (or `@JvmStatic` in a Kotlin `companion object`)
-- Accept exactly one `Event` subtype parameter
-- Return `Unit`
-
-### 📥 Registering Static Handlers
-
-```kotlin
-object GlobalHandlers {
-    @JvmStatic
-    @EventHandler(priority = 5)
-    fun onGlobal(event: SomeEvent) {
-        println("Static handler fired!")
-    }
-}
-
-// Register
-bus.subscribeStatic(GlobalHandlers::class)
-```
-
-### 📤 Unregistering Static Handlers
-
-```kotlin
-bus.unsubscribeStatic(GlobalHandlers::class)
-```
-
-### 🧪 Example: Static + Instance Together
-
-```kotlin
-class MixedHandlers {
-    @EventHandler
-    fun instanceHandler(event: SomeEvent) {
-        println("Instance handler")
-    }
-
-    companion object {
-        @JvmStatic
-        @EventHandler
-        fun staticHandler(event: SomeEvent) {
-            println("Static handler")
-        }
-    }
-}
-
-bus.subscribe(MixedHandlers())
-bus.subscribeStatic(MixedHandlers.Companion::class)
-
-bus.post(SomeEvent())
-// Output:
-// Static handler
-// Instance handler
-```
-
-Static handlers remain active until explicitly unregistered because they are not weak-referenced.
+You get a simple, annotation-driven API with performance close to hand-written dispatch logic.
 
 ---
 
@@ -302,18 +372,18 @@ Static handlers remain active until explicitly unregistered because they are not
 
 This event system is:
 
-- Easy to use
-- Fast when possible
-- Fully compatible with private handlers
-- Robust thanks to graceful fallback behavior
-- Memory‑friendly via weak references
-- Flexible due to Cancelable & Modifiable interfaces
+- Easy to integrate (just `Bus()`, `Event`, and annotations)
+- Fast in the hot path thanks to compiled invokers
+- Flexible, with:
+    - cancelable and modifiable events
+    - instance and static handlers
+    - rich, typed exception handling via `@ExceptionHandler`
+- Memory‑friendly due to weak references and automatic handler cleanup
 
-Perfect for plugins, modular architectures, game engines, or any system requiring decoupled communication.
+Great for plugins, modular architectures, game engines, and any system that benefits from decoupled, event-driven communication.
 
 ---
 
 ## 📜 License
 
 Apache 2.0 — see the [LICENSE](LICENSE) file for details.
-

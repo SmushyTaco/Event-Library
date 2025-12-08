@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.smushytaco.event_library.internal.handlers.event
+package com.smushytaco.event_library.internal.handlers
 
 import com.smushytaco.event_library.internal.invokers.event.StaticEventInvoker
 

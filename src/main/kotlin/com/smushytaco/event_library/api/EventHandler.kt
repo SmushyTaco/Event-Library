@@ -21,17 +21,19 @@ package com.smushytaco.event_library.api
  * of the appropriate type is posted to a [Bus].
  *
  * A valid event handler method must:
+ *
  * - Be annotated with [EventHandler].
  * - Accept exactly one parameter whose type implements [Event].
  * - Have a `void`/`Unit` return type.
  *
- * Event handlers may be registered by passing the containing object to
- * [Bus.subscribe]. The event bus automatically discovers annotated methods
- * and invokes them when matching events are posted.
+ * Handlers may be either instance methods (discovered via [Bus.subscribe]) or
+ * static / `@JvmStatic` methods (discovered via [Bus.subscribeStatic]).
+ *
+ * When an event is posted, all matching handlers are invoked in order of
+ * descending [priority].
  *
  * @property priority Determines the execution order when multiple handlers
- *        receive the same event. Higher values run **earlier**. Handlers with
- *        equal priority execute in the order they were registered.
+ *        receive the same event. Higher values run **earlier**.
  */
 @Retention(AnnotationRetention.RUNTIME)
 @Target(AnnotationTarget.FUNCTION)
