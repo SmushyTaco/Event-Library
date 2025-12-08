@@ -21,12 +21,12 @@ import com.smushytaco.event_library.api.Bus
 import com.smushytaco.event_library.api.Cancelable
 import com.smushytaco.event_library.api.Event
 import com.smushytaco.event_library.api.EventHandler
-import com.smushytaco.event_library.internal.event_invokers.EventInvoker
-import com.smushytaco.event_library.internal.event_invokers.InstanceEventInvoker
-import com.smushytaco.event_library.internal.event_invokers.StaticEventInvoker
-import com.smushytaco.event_library.internal.handlers.Handler
-import com.smushytaco.event_library.internal.handlers.InstanceHandler
-import com.smushytaco.event_library.internal.handlers.StaticHandler
+import com.smushytaco.event_library.internal.handlers.event.EventHandlerEntry
+import com.smushytaco.event_library.internal.handlers.event.InstanceEventHandlerEntry
+import com.smushytaco.event_library.internal.handlers.event.StaticEventHandlerEntry
+import com.smushytaco.event_library.internal.invokers.event.EventInvoker
+import com.smushytaco.event_library.internal.invokers.event.InstanceEventInvoker
+import com.smushytaco.event_library.internal.invokers.event.StaticEventInvoker
 import org.slf4j.LoggerFactory
 import java.lang.invoke.LambdaMetafactory
 import java.lang.invoke.MethodHandles
@@ -178,7 +178,7 @@ internal class EventManager : Bus {
      *
      * Handlers are stored in priority order (highest first).
      */
-    private val methodCache: MutableMap<Class<out Event>, MutableList<Handler>> = mutableMapOf()
+    private val methodCache: MutableMap<Class<out Event>, MutableList<EventHandlerEntry>> = mutableMapOf()
     /**
      * Tracks which event types each subscriber object handles.
      *
@@ -193,7 +193,7 @@ internal class EventManager : Bus {
                     var hasRemovedAnything = false
                     for (eventClass in events) {
                         methodCache[eventClass]?.removeIf { handler ->
-                            val condition = handler is InstanceHandler && handler.target.get() == null
+                            val condition = handler is InstanceEventHandlerEntry && handler.target.get() == null
                             if (condition) hasRemovedAnything = true
                             condition
                         }
@@ -222,7 +222,7 @@ internal class EventManager : Bus {
      * Resolved lists include handlers for superclasses and interfaces of
      * the event type, allowing polymorphic event dispatch.
      */
-    private val resolvedCache: MutableMap<Class<out Event>, List<Handler>> = mutableMapOf()
+    private val resolvedCache: MutableMap<Class<out Event>, List<EventHandlerEntry>> = mutableMapOf()
 
     override fun subscribe(any: Any) {
         synchronized(lock) {
@@ -247,7 +247,7 @@ internal class EventManager : Bus {
                 @Suppress("UNCHECKED_CAST")
                 val eventClass = method.parameterTypes[0] as Class<out Event>
                 val priority = method.getAnnotation(EventHandler::class.java).priority
-                val handler = InstanceHandler(WeakReference(any), instanceInvoker, priority)
+                val handler = InstanceEventHandlerEntry(WeakReference(any), instanceInvoker, priority)
 
                 sharedSubscribeLogic(eventClass, priority, handler, any)
             }
@@ -260,7 +260,7 @@ internal class EventManager : Bus {
             val eventClasses = objectEventMap.getIfPresent(any) ?: return
             eventClasses.forEach { eventClass ->
                 methodCache[eventClass]?.removeIf {
-                    if (it !is InstanceHandler) return@removeIf false
+                    if (it !is InstanceEventHandlerEntry) return@removeIf false
                     val target = it.target.get()
                     target == null || target === any
                 }
@@ -293,7 +293,7 @@ internal class EventManager : Bus {
                 val eventClass = method.parameterTypes[0] as Class<out Event>
                 val priority = method.getAnnotation(EventHandler::class.java).priority
 
-                val handler = StaticHandler(type, staticInvoker, priority)
+                val handler = StaticEventHandlerEntry(type, staticInvoker, priority)
 
                 sharedSubscribeLogic(eventClass, priority, handler, type = type)
             }
@@ -307,7 +307,7 @@ internal class EventManager : Bus {
             val eventClasses = staticEventMap[type] ?: return
             eventClasses.forEach { eventClass ->
                 methodCache[eventClass]?.removeIf {
-                    it is StaticHandler && it.owner == type
+                    it is StaticEventHandlerEntry && it.owner == type
                 }
             }
             staticEventMap.remove(type)
@@ -331,11 +331,11 @@ internal class EventManager : Bus {
             if (cancelable?.canceled == true) break
             try {
                 when(handler) {
-                    is InstanceHandler -> {
+                    is InstanceEventHandlerEntry -> {
                         val target = handler.target.get() ?: continue
                         handler.invoker(target, event)
                     }
-                    is StaticHandler -> handler.invoker(event)
+                    is StaticEventHandlerEntry -> handler.invoker(event)
                 }
             } catch (e: Exception) {
                 logger.error("Failed to invoke handler for event: ${event::class.simpleName}", e)
@@ -345,7 +345,7 @@ internal class EventManager : Bus {
     /**
      * Shared internal logic for registering both instance-based and static event handlers.
      *
-     * This function inserts the given [handler] into the global [methodCache] for the supplied
+     * This function inserts the given [eventHandlerEntry] into the global [methodCache] for the supplied
      * [eventClass], preserving priority ordering (higher priority first). It then records the
      * handler's ownership in either:
      *
@@ -359,18 +359,18 @@ internal class EventManager : Bus {
      *
      * @param eventClass the event type the handler should receive.
      * @param priority the handler’s priority as defined by [EventHandler.priority].
-     * @param handler the fully constructed handler instance to register.
+     * @param eventHandlerEntry the fully constructed handler instance to register.
      * @param any the subscriber instance owning the handler, or `null` for static handlers.
      * @param type the subscriber class owning static handlers, or `null` for instance handlers.
      */
-    private fun sharedSubscribeLogic(eventClass: Class<out Event>, priority: Int, handler: Handler, any: Any? = null, type: Class<*>? = null) {
+    private fun sharedSubscribeLogic(eventClass: Class<out Event>, priority: Int, eventHandlerEntry: EventHandlerEntry, any: Any? = null, type: Class<*>? = null) {
         val list = methodCache.getOrPut(eventClass) { mutableListOf() }
 
         val index = list.indexOfFirst { it.priority < priority }
         if (index == -1) {
-            list.add(handler)
+            list.add(eventHandlerEntry)
         } else {
-            list.add(index, handler)
+            list.add(index, eventHandlerEntry)
         }
         any?.let {
             val list = objectEventMap.getIfPresent(it)
@@ -393,8 +393,8 @@ internal class EventManager : Bus {
      * @param eventClass the event type being dispatched.
      * @return a combined list of handlers applicable to the event.
      */
-    private fun collectHandlersFor(eventClass: Class<out Event>): List<Handler> {
-        val result = mutableListOf<Handler>()
+    private fun collectHandlersFor(eventClass: Class<out Event>): List<EventHandlerEntry> {
+        val result = mutableListOf<EventHandlerEntry>()
         val seen = mutableSetOf<Class<*>>()
         val queue = ArrayDeque<Class<*>>()
 
@@ -405,8 +405,8 @@ internal class EventManager : Bus {
             if (!seen.add(current)) continue
 
             @Suppress("UNCHECKED_CAST")
-            val handlers: List<Handler>? = methodCache[current as Class<out Event>]
-            if (handlers != null) result.addAll(handlers)
+            val eventHandlerEntries: List<EventHandlerEntry>? = methodCache[current as Class<out Event>]
+            if (eventHandlerEntries != null) result.addAll(eventHandlerEntries)
 
             current.superclass
                 ?.takeIf { Event::class.java.isAssignableFrom(it) }

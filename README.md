@@ -249,7 +249,7 @@ Static handlers must:
 ### 📥 Registering Static Handlers
 
 ```kotlin
-class GlobalHandlers {
+object GlobalHandlers {
     @JvmStatic
     @EventHandler(priority = 5)
     fun onGlobal(event: SomeEvent) {

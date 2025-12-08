@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 
-package com.smushytaco.event_library.internal.handlers
+package com.smushytaco.event_library.internal.handlers.event
 
-import com.smushytaco.event_library.internal.event_invokers.StaticEventInvoker
+import com.smushytaco.event_library.internal.invokers.event.StaticEventInvoker
 
 /**
  * Internal representation of a static event handler.
  *
- * A [StaticHandler] describes a handler method that is declared as `static`
+ * A [StaticEventHandlerEntry] describes a handler method that is declared as `static`
  * (in Java) or as a `@JvmStatic` member on a Kotlin object/companion. Unlike
- * [InstanceHandler], it is not tied to a specific subscriber instance and
+ * [InstanceEventHandlerEntry], it is not tied to a specific subscriber instance and
  * therefore does not rely on weak references for lifecycle management.
  *
  * Static handlers remain active until they are explicitly unregistered by
@@ -37,8 +37,8 @@ import com.smushytaco.event_library.internal.event_invokers.StaticEventInvoker
  * @property priority execution ordering hint used when multiple handlers
  *                    listen to the same event type; higher values are invoked first.
  */
-internal data class StaticHandler(
+internal data class StaticEventHandlerEntry(
     val owner: Class<*>,
     override val invoker: StaticEventInvoker,
     override val priority: Int
-) : Handler
+) : EventHandlerEntry

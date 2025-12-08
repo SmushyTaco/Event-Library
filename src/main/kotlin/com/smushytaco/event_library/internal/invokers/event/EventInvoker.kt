@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.smushytaco.event_library.internal.event_invokers
+package com.smushytaco.event_library.internal.invokers.event
 
 /**
  * Sealed marker interface for all event invocation strategies.

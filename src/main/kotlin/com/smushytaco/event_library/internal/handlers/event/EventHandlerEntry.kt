@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 
-package com.smushytaco.event_library.internal.handlers
+package com.smushytaco.event_library.internal.handlers.event
 
-import com.smushytaco.event_library.internal.event_invokers.EventInvoker
+import com.smushytaco.event_library.internal.invokers.event.EventInvoker
 
 /**
  * Sealed base type for all registered event handlers.
  *
  * Concrete implementations distinguish between:
- * - [InstanceHandler] — handlers bound to a specific subscriber instance.
- * - [StaticHandler] — handlers backed by static methods on a class.
+ * - [InstanceEventHandlerEntry] — handlers bound to a specific subscriber instance.
+ * - [StaticEventHandlerEntry] — handlers backed by static methods on a class.
  *
  * Each handler wraps an [EventInvoker] that knows how to invoke the
  * underlying method, along with a [priority] value used to order execution
@@ -35,7 +35,7 @@ import com.smushytaco.event_library.internal.event_invokers.EventInvoker
  * @property invoker strategy object responsible for invoking the underlying handler with the appropriate arguments.
  * @property priority execution ordering hint; higher values are dispatched earlier.
  */
-internal sealed interface Handler {
+internal sealed interface EventHandlerEntry {
     val invoker: EventInvoker
     val priority: Int
 }

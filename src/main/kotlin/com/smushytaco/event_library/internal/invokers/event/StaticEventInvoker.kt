@@ -14,25 +14,23 @@
  * limitations under the License.
  */
 
-package com.smushytaco.event_library.internal.event_invokers
+package com.smushytaco.event_library.internal.invokers.event
 
 import com.smushytaco.event_library.api.Event
 
 /**
- * Invocation strategy for instance-based event handler methods.
+ * Invocation strategy for static event handler methods.
  *
- * An [InstanceEventInvoker] represents a compiled or reflective call target
- * for a handler method that operates on a specific subscriber instance.
- * It is typically created by the event system using [LambdaMetafactory][java.lang.invoke.LambdaMetafactory]
- * for optimal performance, with reflective fallback used when lambda
- * generation fails or is not permitted.
+ * A [StaticEventInvoker] represents a compiled or reflective call target
+ * for a handler method that does not require an instance receiver. It is
+ * typically created by the event system using [LambdaMetafactory][java.lang.invoke.LambdaMetafactory] for
+ * optimal performance, with a reflective fallback when necessary.
  */
-internal fun interface InstanceEventInvoker : EventInvoker {
+internal fun interface StaticEventInvoker : EventInvoker {
     /**
-     * Invokes the underlying instance handler method.
+     * Invokes the underlying static handler method.
      *
-     * @param target the subscriber object on which the handler method is invoked.
      * @param event the event instance being dispatched to the handler.
      */
-    operator fun invoke(target: Any, event: Event)
+    operator fun invoke(event: Event)
 }

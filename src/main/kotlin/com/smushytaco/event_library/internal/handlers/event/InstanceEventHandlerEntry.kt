@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-package com.smushytaco.event_library.internal.handlers
+package com.smushytaco.event_library.internal.handlers.event
 
-import com.smushytaco.event_library.internal.event_invokers.InstanceEventInvoker
+import com.smushytaco.event_library.internal.invokers.event.InstanceEventInvoker
 import java.lang.ref.WeakReference
 
 /**
  * Internal representation of an instance-based event handler.
  *
- * An [InstanceHandler] binds a discovered handler method to a specific
+ * An [InstanceEventHandlerEntry] binds a discovered handler method to a specific
  * subscriber object. The subscriber is referenced via a [WeakReference],
  * allowing it to be garbage-collected without requiring an explicit
  * unsubscribe call. When the target is collected, the handler is
@@ -36,8 +36,8 @@ import java.lang.ref.WeakReference
  * @property priority execution ordering hint used when multiple handlers
  *                    listen to the same event type; higher values are invoked first.
  */
-internal data class InstanceHandler(
+internal data class InstanceEventHandlerEntry(
     val target: WeakReference<Any>,
     override val invoker: InstanceEventInvoker,
     override val priority: Int
-) : Handler
+) : EventHandlerEntry

@@ -14,23 +14,25 @@
  * limitations under the License.
  */
 
-package com.smushytaco.event_library.internal.event_invokers
+package com.smushytaco.event_library.internal.invokers.exception
 
 import com.smushytaco.event_library.api.Event
 
 /**
- * Invocation strategy for static event handler methods.
+ * Invoker for static exception handler methods that declare only an event:
  *
- * A [StaticEventInvoker] represents a compiled or reflective call target
- * for a handler method that does not require an instance receiver. It is
- * typically created by the event system using [LambdaMetafactory][java.lang.invoke.LambdaMetafactory] for
- * optimal performance, with a reflective fallback when necessary.
+ *     fun onFailure(event: E)
+ *
+ * This handler is selected when the event being processed is an instance of
+ * `E` **or any subtype**, regardless of which exception was thrown.
+ *
+ * These handlers provide event-scoped catch-all behavior at the class level.
  */
-internal fun interface StaticEventInvoker : EventInvoker {
+internal fun interface StaticExceptionEventOnlyInvoker : StaticExceptionInvokers {
     /**
-     * Invokes the underlying static handler method.
+     * Invokes the static exception handler method.
      *
-     * @param event the event instance being dispatched to the handler.
+     * @param event the event whose handler produced an exception.
      */
     operator fun invoke(event: Event)
 }
