@@ -90,7 +90,7 @@ Instance subscribers are stored via `WeakReference`. When a subscriber becomes u
 - No memory leaks from forgotten `unsubscribe` calls.
 - Caches are invalidated when stale handlers are removed.
 
-### 🛑 Cancelable Events
+### 🛑 Cancelable Events & Cancel Modes
 
 Events can opt into cancellation:
 
@@ -99,17 +99,53 @@ class ExampleEvent : Event, Cancelable by Cancelable()
 
 @EventHandler
 fun onExample(event: ExampleEvent) {
-    // Stop further processing
+    // Stop further processing according to the active CancelMode
     event.markCanceled()
 }
 ```
 
-When posting, choose whether cancellation should be enforced:
+When posting, you choose how the bus interprets cancellation via CancelMode:
 
 ```kotlin
-bus.post(event, respectCancels = true)  // stops once canceled
-bus.post(event)                         // ignores cancel flag
+bus.post(event) // default: CancelMode.RESPECT
+
+bus.post(event, cancelMode = CancelMode.IGNORE)
+bus.post(event, cancelMode = CancelMode.RESPECT)
+bus.post(event, cancelMode = CancelMode.ENFORCE)
 ```
+
+**CancelMode semantics:**
+
+- `IGNORE` – Cancellation is treated as purely informational.  
+  All handlers run in normal priority order, regardless of `event.canceled`.  
+  The `runIfCanceled` flag on handlers is ignored.
+
+- `RESPECT` *(default)* – Cancellation acts as a **per‑handler filter**.  
+  If `event` is not canceled, all handlers run.  
+  If `event` *is* canceled, then:
+    - handlers with `@EventHandler(runIfCanceled = true)` still run;
+    - handlers with `runIfCanceled = false` are skipped.
+      Dispatch never short‑circuits; all eligible handlers are invoked.
+
+- `ENFORCE` – Cancellation acts as a **hard stop**.  
+  As soon as the event is observed in a canceled state—either before posting or during handler execution—no further handlers are invoked, regardless of `runIfCanceled`.
+
+Handlers can opt into receiving canceled events when using `CancelMode.RESPECT`:
+
+```kotlin
+class AuditSubscriber {
+    @EventHandler(runIfCanceled = true, priority = -10)
+    fun audit(event: ExampleEvent) {
+        println("Audit log for ${event}: canceled = ${event.canceled}")
+    }
+}
+```
+
+In this setup:
+
+- With `CancelMode.RESPECT`, normal handlers (default `runIfCanceled = false`) are skipped once the event is canceled, but `audit` still runs.
+- With `CancelMode.IGNORE`, all handlers run regardless of cancellation.
+- With `CancelMode.ENFORCE`, no handlers after the cancellation point will run at all.
 
 ### ✏️ Modifiable Events
 
@@ -176,7 +212,7 @@ And the following to your `gradle/libs.versions.toml`:
 ```toml
 [versions]
 # Check this on https://central.sonatype.com/artifact/com.smushytaco/event-library/
-eventLibrary = "3.0.0"
+eventLibrary = "4.0.0"
 
 [libraries]
 eventLibrary = { group = "com.smushytaco", name = "event-library", version.ref = "eventLibrary" }
@@ -243,10 +279,17 @@ class MySubscriber {
     private fun onMyEvent(event: MyEvent) {
         println("Got event: $event")
     }
+
+    @EventHandler(runIfCanceled = true, priority = -10)
+    fun onCanceledMyEvent(event: MyEvent) {
+        println("Observed MyEvent after cancellation: ${event.canceled}")
+    }
 }
 ```
 
 Handlers are invoked in **descending priority** order. For event handlers, handlers with the same priority are invoked in the order they were effectively registered.
+
+Cancellation behavior for handlers depends on both the event’s `Cancelable` state and the `CancelMode` used for `post(...)`, as described in the **Cancelable Events & Cancel Modes** section.
 
 ### Exception Handlers (`@ExceptionHandler`)
 
@@ -304,7 +347,10 @@ class MessageSubscriber {
     @EventHandler(priority = 10)
     fun onMessage(event: MessageEvent) {
         println("Handling message: ${event.text}")
+
         if (event.text.contains("stop", ignoreCase = true)) {
+            // Mark the event as canceled; how this affects dispatch depends
+            // on the CancelMode chosen at post time.
             event.markCanceled()
         }
 
@@ -341,18 +387,22 @@ val subscriber = MessageSubscriber()
 bus.subscribe(subscriber)
 
 val event = MessageEvent("Hello, boom world")
-bus.post(event, respectCancels = true)
+
+// Choose how cancellation should behave:
+// - IGNORE: treat canceled as informational only.
+// - RESPECT (default): only run handlers that opt in via runIfCanceled once canceled.
+// - ENFORCE: stop dispatch as soon as the event is canceled.
+bus.post(event, cancelMode = CancelMode.ENFORCE)
 
 println("Canceled?  ${event.canceled}")
 println("Modified? ${event.modified}")
 ```
 
-This will:
+Depending on the `CancelMode` you choose and how your handlers are annotated with `runIfCanceled`, you can implement:
 
-1. Invoke `onMessage`.
-2. Throw `IllegalArgumentException` → dispatch to `@ExceptionHandler` methods.
-3. Continue to `after` **only if** the event is not canceled and exception handlers didn’t throw.
-4. Allow you to inspect `event.canceled` and `event.modified` after dispatch.
+- simple, fire‑every‑handler semantics,
+- fine‑grained “some handlers still run after cancellation” pipelines, or
+- strict “first handler to cancel aborts everything” behavior.
 
 ---
 
@@ -378,6 +428,7 @@ This event system is:
     - cancelable and modifiable events
     - instance and static handlers
     - rich, typed exception handling via `@ExceptionHandler`
+    - configurable cancellation behavior via CancelMode and per-handler `runIfCanceled`
 - Memory‑friendly due to weak references and automatic handler cleanup
 
 Great for plugins, modular architectures, game engines, and any system that benefits from decoupled, event-driven communication.

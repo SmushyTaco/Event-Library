@@ -294,7 +294,8 @@ private class PrivateExceptionHandlerSubscriber {
 
 /**
  * Subscriber that combines cancellation with a throwing handler to ensure
- * respectCancels=true prevents the throwing handler from running.
+ * dispatch mode controls whether the throwing handler (and its exception
+ * handlers) run.
  */
 private class CancelingExceptionHandlerSubscriber {
     val calls = mutableListOf<String>()
@@ -671,18 +672,18 @@ class ExceptionHandlerTest {
     }
 
     @Test
-    fun `cancellation prevents throwing handler and exception handlers when respectCancels is true`() {
+    fun `cancellation prevents throwing handler and exception handlers when cancelMode is ENFORCE`() {
         val bus = Bus()
         val subscriber = CancelingExceptionHandlerSubscriber()
         val event = ExceptionCancelableEvent()
 
         bus.subscribe(subscriber)
-        bus.post(event, respectCancels = true)
+        bus.post(event, CancelMode.ENFORCE)
 
         assertEquals(
             listOf("cancelFirst"),
             subscriber.calls,
-            "Second handler should not run once event is canceled with respectCancels=true"
+            "Second handler should not run once event is canceled with cancelMode=ENFORCE"
         )
         assertEquals(
             0,
@@ -693,18 +694,18 @@ class ExceptionHandlerTest {
     }
 
     @Test
-    fun `cancellation is ignored when respectCancels is false and exception handler runs`() {
+    fun `cancellation is ignored when cancelMode is IGNORE and exception handler runs`() {
         val bus = Bus()
         val subscriber = CancelingExceptionHandlerSubscriber()
         val event = ExceptionCancelableEvent()
 
         bus.subscribe(subscriber)
-        bus.post(event) // respectCancels defaults to false
+        bus.post(event, CancelMode.IGNORE)
 
         assertEquals(
             listOf("cancelFirst", "throwing"),
             subscriber.calls,
-            "Both handlers should run when respectCancels=false"
+            "Both handlers should run when cancelMode=IGNORE"
         )
         assertEquals(
             1,

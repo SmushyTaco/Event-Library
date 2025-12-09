@@ -39,5 +39,6 @@ import java.lang.ref.WeakReference
 internal data class InstanceEventHandlerEntry(
     val target: WeakReference<Any>,
     override val invoker: InstanceEventInvoker,
-    override val priority: Int
+    override val priority: Int,
+    override val runIfCanceled: Boolean
 ) : EventHandlerEntry

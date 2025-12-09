@@ -19,6 +19,7 @@
 package com.smushytaco.event_library
 
 import com.smushytaco.event_library.api.Bus
+import com.smushytaco.event_library.api.CancelMode
 import com.smushytaco.event_library.api.Cancelable
 import com.smushytaco.event_library.api.Event
 import com.smushytaco.event_library.api.EventHandler
@@ -45,7 +46,7 @@ private class MixedEvent : Event
 private class CombinedEvent : Event
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Static-only subscribers
+/* Static-only subscribers */
 // ────────────────────────────────────────────────────────────────────────────────
 
 private class StaticSimpleSubscriber {
@@ -155,7 +156,7 @@ private class StaticExceptionSubscriber {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
-// Mixed static + instance subscribers
+/* Mixed static + instance subscribers */
 // ────────────────────────────────────────────────────────────────────────────────
 
 private class MixedSubscriber {
@@ -318,41 +319,41 @@ class StaticHandlersTest {
     }
 
     @Test
-    fun `static handlers respect cancellation when respectCancels is true`() {
+    fun `static handlers stop after cancellation when cancelMode is ENFORCE`() {
         val bus = Bus()
         val event = StaticCancelableEvent()
 
         StaticCancelingSubscriber.reset()
 
         bus.subscribeStatic(StaticCancelingSubscriber::class.java)
-        bus.post(event, respectCancels = true)
+        bus.post(event, CancelMode.ENFORCE)
 
         assertEquals(
             listOf("first"),
             StaticCancelingSubscriber.calls,
-            "Lower-priority static handler should not run once event is canceled with respectCancels=true"
+            "Lower-priority static handler should not run once event is canceled with cancelMode=ENFORCE"
         )
         assertTrue(event.canceled, "Static cancelable event should be marked as canceled")
     }
 
     @Test
-    fun `static handlers ignore cancellation when respectCancels is false`() {
+    fun `static handlers ignore cancellation when cancelMode is IGNORE`() {
         val bus = Bus()
         val event = StaticCancelableEvent()
 
         StaticCancelingSubscriber.reset()
 
         bus.subscribeStatic(StaticCancelingSubscriber::class.java)
-        bus.post(event) // respectCancels defaults to false
+        bus.post(event, CancelMode.IGNORE)
 
         assertEquals(
             listOf("first", "second"),
             StaticCancelingSubscriber.calls,
-            "Both static handlers should run when respectCancels=false"
+            "Both static handlers should run when cancelMode=IGNORE"
         )
         assertTrue(
             event.canceled,
-            "Static event is still cancelable, but cancellation is not enforced by the bus"
+            "Static event is still cancelable, but cancellation is not enforced by the bus in IGNORE mode"
         )
     }
 

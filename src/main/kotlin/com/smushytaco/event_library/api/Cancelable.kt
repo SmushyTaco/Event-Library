@@ -22,13 +22,21 @@ import com.smushytaco.event_library.internal.CancelableImpl
 /**
  * Represents an object that can be marked as canceled.
  *
- * This is typically used by events whose handlers may choose to
- * interrupt or prevent further processing. When an event implementing
- * [Cancelable] is posted with cancellation respected, event dispatching
- * halts as soon as the event becomes canceled.
+ * This is typically used by events whose handlers may choose to interrupt or
+ * prevent further processing. When an event implementing [Cancelable] is
+ * posted via [Bus.post], its [canceled] flag is interpreted according to
+ * the selected [CancelMode]:
+ *
+ * - With [CancelMode.IGNORE], the flag is ignored by the bus and all
+ *   handlers run.
+ * - With [CancelMode.RESPECT], canceled events are delivered only to
+ *   handlers that opt in via [EventHandler.runIfCanceled].
+ * - With [CancelMode.ENFORCE], dispatch stops as soon as the event is
+ *   observed in a canceled state.
  *
  * A default implementation is provided via the companion object's [invoke] operator.
  */
+
 interface Cancelable {
     /**
      * Factory for obtaining the default [Cancelable] implementation.

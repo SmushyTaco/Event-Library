@@ -126,19 +126,48 @@ interface Bus {
      */
     fun unsubscribeStatic(type: KClass<*>) = unsubscribeStatic(type.java)
     /**
-     * Posts an event to all matching subscribers.
+     * Posts an [event] to all matching event handlers registered on this [Bus].
      *
-     * Event handlers are invoked in priority order as defined by
-     * [EventHandler.priority]. If an event handler throws, the exception is routed
-     * to any matching `@ExceptionHandler` methods; the bus then continues
-     * dispatching to the remaining event handlers unless an exception handler
-     * itself throws.
+     * Handlers are invoked in descending [EventHandler.priority] order. If a handler
+     * throws, the failure is routed to any matching `@ExceptionHandler` methods;
+     * dispatch then continues unless an exception handler itself throws.
      *
-     * If [event] implements [Cancelable] and [respectCancels] is `true`,
-     * dispatching will stop as soon as the event is marked as canceled.
+     * ## Cancellation Semantics
+     *
+     * If the event implements [Cancelable], its cancellation state is interpreted
+     * according to the supplied [cancelMode]:
+     *
+     * - **[CancelMode.IGNORE]**
+     *   Cancellation is completely disregarded. All handlers run in normal priority
+     *   order, regardless of whether the event has been marked as canceled.
+     *
+     * - **[CancelMode.RESPECT]** *(default)*
+     *   Cancellation acts as a **per-handler filter**.
+     *   Canceled events are delivered *only* to handlers that explicitly opt in to
+     *   receiving them via [EventHandler.runIfCanceled].
+     *   Dispatch never short-circuits; all eligible handlers are invoked.
+     *
+     * - **[CancelMode.ENFORCE]**
+     *   Cancellation acts as a **hard stop**.
+     *   As soon as the event is marked canceled—either prior to posting or during
+     *   handler execution—no further handlers are invoked, regardless of handler
+     *   preferences.
+     *
+     * ## Exception Handling
+     *
+     * If an event handler throws, exception dispatch follows the rules defined by
+     * `@ExceptionHandler`:
+     *
+     * - matching handlers are invoked in descending priority and specificity,
+     * - if no handler processes the throwable:
+     *     - `Exception` (and subclasses) are logged and swallowed,
+     *     - non-`Exception` throwables (e.g., `Error`) are rethrown.
+     *
+     * Exceptions thrown *by exception handlers themselves* are not re-routed and will
+     * propagate out of this function.
      *
      * @param event the event instance to dispatch.
-     * @param respectCancels whether the bus should stop dispatching if the event is cancelled.
+     * @param cancelMode determines how cancellation should influence handler delivery.
      */
-    fun post(event: Event, respectCancels: Boolean = false)
+    fun post(event: Event, cancelMode: CancelMode = CancelMode.RESPECT)
 }

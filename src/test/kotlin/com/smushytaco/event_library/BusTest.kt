@@ -19,6 +19,7 @@
 package com.smushytaco.event_library
 
 import com.smushytaco.event_library.api.Bus
+import com.smushytaco.event_library.api.CancelMode
 import com.smushytaco.event_library.api.Cancelable
 import com.smushytaco.event_library.api.Event
 import com.smushytaco.event_library.api.EventHandler
@@ -145,36 +146,48 @@ class BusTest {
         bus.subscribe(subscriber)
         bus.post(event)
 
-        assertEquals(listOf("high", "low"), subscriber.calls,
-            "Handlers should be invoked from highest to lowest priority")
+        assertEquals(
+            listOf("high", "low"),
+            subscriber.calls,
+            "Handlers should be invoked from highest to lowest priority"
+        )
     }
 
     @Test
-    fun `cancellation stops further handlers when respectCancels is true`() {
+    fun `cancellation stops further handlers when cancelMode is ENFORCE`() {
         val bus = Bus()
         val subscriber = CancelingSubscriber()
         val event = CancelableEvent()
 
         bus.subscribe(subscriber)
-        bus.post(event, respectCancels = true)
+        bus.post(event, CancelMode.ENFORCE)
 
-        assertEquals(listOf("first"), subscriber.calls,
-            "Lower-priority handler should not run once event is canceled with respectCancels=true")
+        assertEquals(
+            listOf("first"),
+            subscriber.calls,
+            "Lower-priority handler should not run once event is canceled with cancelMode=ENFORCE"
+        )
         assertTrue(event.canceled, "Event should be marked as canceled")
     }
 
     @Test
-    fun `cancellation is ignored when respectCancels is false`() {
+    fun `cancellation is ignored when cancelMode is IGNORE`() {
         val bus = Bus()
         val subscriber = CancelingSubscriber()
         val event = CancelableEvent()
 
         bus.subscribe(subscriber)
-        bus.post(event)
+        bus.post(event, CancelMode.IGNORE)
 
-        assertEquals(listOf("first", "second"), subscriber.calls,
-            "Both handlers should run when respectCancels=false")
-        assertTrue(event.canceled, "Event is still cancelable, but cancellation is not enforced by the bus")
+        assertEquals(
+            listOf("first", "second"),
+            subscriber.calls,
+            "Both handlers should run when cancelMode=IGNORE"
+        )
+        assertTrue(
+            event.canceled,
+            "Event is still cancelable, but cancellation is not enforced by the bus in IGNORE mode"
+        )
     }
 
     @Test
@@ -186,8 +199,11 @@ class BusTest {
         bus.subscribe(subscriber)
         bus.post(event)
 
-        assertEquals(listOf("child", "base"), subscriber.calls,
-            "Child-specific handler should run before base-event handler")
+        assertEquals(
+            listOf("child", "base"),
+            subscriber.calls,
+            "Child-specific handler should run before base-event handler"
+        )
     }
 
     @Test
@@ -199,7 +215,10 @@ class BusTest {
         bus.subscribe(subscriber)
         bus.post(event)
 
-        assertEquals(listOf("throwing", "after"), subscriber.calls,
-            "Second handler should still run even if the first throws an exception")
+        assertEquals(
+            listOf("throwing", "after"),
+            subscriber.calls,
+            "Second handler should still run even if the first throws an exception"
+        )
     }
 }

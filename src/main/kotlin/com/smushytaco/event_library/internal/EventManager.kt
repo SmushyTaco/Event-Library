@@ -694,10 +694,10 @@ internal class EventManager : Bus {
 
                 @Suppress("UNCHECKED_CAST")
                 val eventClass = method.parameterTypes[0] as Class<out Event>
-                val priority = method.getAnnotation(EventHandler::class.java).priority
-                val handler = InstanceEventHandlerEntry(WeakReference(any), instanceInvoker, priority)
+                val eventHandlerAnnotation = method.getAnnotation(EventHandler::class.java)
+                val handler = InstanceEventHandlerEntry(WeakReference(any), instanceInvoker, eventHandlerAnnotation.priority, eventHandlerAnnotation.runIfCanceled)
 
-                sharedSubscribeLogic(eventMethodCache, objectEventMap, staticEventMap, eventClass, priority, handler, any)
+                sharedSubscribeLogic(eventMethodCache, objectEventMap, staticEventMap, eventClass, eventHandlerAnnotation.priority, handler, any)
             }
             resolvedEventCache.clear()
 
@@ -787,11 +787,11 @@ internal class EventManager : Bus {
 
                 @Suppress("UNCHECKED_CAST")
                 val eventClass = method.parameterTypes[0] as Class<out Event>
-                val priority = method.getAnnotation(EventHandler::class.java).priority
+                val eventHandlerAnnotation = method.getAnnotation(EventHandler::class.java)
 
-                val handler = StaticEventHandlerEntry(type, staticInvoker, priority)
+                val handler = StaticEventHandlerEntry(type, staticInvoker, eventHandlerAnnotation.priority, eventHandlerAnnotation.runIfCanceled)
 
-                sharedSubscribeLogic(eventMethodCache, objectEventMap, staticEventMap, eventClass, priority, handler, type = type)
+                sharedSubscribeLogic(eventMethodCache, objectEventMap, staticEventMap, eventClass, eventHandlerAnnotation.priority, handler, type = type)
             }
             resolvedEventCache.clear()
 
@@ -849,10 +849,10 @@ internal class EventManager : Bus {
         }
     }
 
-    override fun post(event: Event, respectCancels: Boolean) {
-        val cancelable = if (respectCancels) event as? Cancelable else null
+    override fun post(event: Event, cancelMode: CancelMode) {
+        val cancelable = event as? Cancelable
 
-        if (cancelable?.canceled == true) return
+        if (cancelMode == CancelMode.ENFORCE && cancelable?.canceled == true) return
 
         val handlers = synchronized(lock) {
             val eventClass = event::class.java
@@ -862,7 +862,10 @@ internal class EventManager : Bus {
                     .also { resolvedEventCache[eventClass] = it }
         }
         for (handler in handlers) {
-            if (cancelable?.canceled == true) break
+            if (cancelable?.canceled == true) {
+                if (cancelMode == CancelMode.RESPECT && !handler.runIfCanceled) continue
+                if (cancelMode == CancelMode.ENFORCE) break
+            }
             try {
                 when(handler) {
                     is InstanceEventHandlerEntry -> {
@@ -884,7 +887,7 @@ internal class EventManager : Bus {
      *
      * 1. Starts at [eventClass].
      * 2. For each visited class, looks up any handlers in [methodCache] keyed by that
-     *    class and appends them to [result].
+     *    class and appends them to result.
      * 3. Enqueues the superclass (if it implements [Event]) and all interfaces that
      *    implement [Event], continuing until the hierarchy has been exhausted.
      *

@@ -40,5 +40,6 @@ import com.smushytaco.event_library.internal.invokers.event.StaticEventInvoker
 internal data class StaticEventHandlerEntry(
     val owner: Class<*>,
     override val invoker: StaticEventInvoker,
-    override val priority: Int
+    override val priority: Int,
+    override val runIfCanceled: Boolean
 ) : EventHandlerEntry
