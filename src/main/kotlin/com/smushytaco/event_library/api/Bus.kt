@@ -48,6 +48,8 @@ interface Bus {
          *
          * @return a fresh [Bus] instance backed by an internal [EventManager].
          */
+        @JvmStatic
+        @JvmName("create")
         operator fun invoke(): Bus = EventManager()
     }
     /**

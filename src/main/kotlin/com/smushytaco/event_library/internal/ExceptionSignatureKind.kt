@@ -17,6 +17,7 @@
 package com.smushytaco.event_library.internal
 
 import com.smushytaco.event_library.api.Event
+import com.smushytaco.event_library.internal.ExceptionSignatureKind.Companion.exceptionSignatureKind
 import java.lang.reflect.Method
 
 /**

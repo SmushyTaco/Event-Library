@@ -18,12 +18,9 @@
 
 package com.smushytaco.event_library
 
-import com.smushytaco.event_library.api.Bus
-import com.smushytaco.event_library.api.CancelMode
-import com.smushytaco.event_library.api.Cancelable
-import com.smushytaco.event_library.api.Event
-import com.smushytaco.event_library.api.EventHandler
-import org.junit.jupiter.api.Assertions.*
+import com.smushytaco.event_library.api.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 // ────────────────────────────────────────────────────────────────────────────────

@@ -681,13 +681,7 @@ internal class EventManager : Bus {
             val klass = any::class.java
 
             val methods = allDeclaredMethods(klass)
-                .onEach {
-                    try {
-                        it.isAccessible = true
-                    } catch (e: Exception) {
-                        logger.error("Failed to make ${it.name} accessible.", e)
-                    }
-                }
+                .onEach { if (!it.trySetAccessible()) logger.error("Failed to make ${it.name} accessible.") }
                 .toList()
 
             for (method in methods) {

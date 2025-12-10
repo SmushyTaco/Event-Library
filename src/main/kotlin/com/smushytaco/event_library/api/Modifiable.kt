@@ -42,6 +42,8 @@ interface Modifiable {
          *
          * @return a fresh, unmodified [Modifiable] instance.
          */
+        @JvmStatic
+        @JvmName("create")
         operator fun invoke(): Modifiable = ModifiableImpl()
     }
     /**

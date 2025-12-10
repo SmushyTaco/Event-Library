@@ -50,6 +50,8 @@ interface Cancelable {
          *
          * @return a fresh, uncanceled [Cancelable] instance.
          */
+        @JvmStatic
+        @JvmName("create")
         operator fun invoke(): Cancelable = CancelableImpl()
     }
     /**
