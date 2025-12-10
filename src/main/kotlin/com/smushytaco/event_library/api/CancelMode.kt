@@ -84,4 +84,3 @@ enum class CancelMode {
      */
     ENFORCE
 }
-
