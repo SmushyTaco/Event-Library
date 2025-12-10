@@ -171,5 +171,33 @@ interface Bus {
      * @param event the event instance to dispatch.
      * @param cancelMode determines how cancellation should influence handler delivery.
      */
-    fun post(event: Event, cancelMode: CancelMode = CancelMode.RESPECT)
+    fun post(event: Event, cancelMode: CancelMode)
+    /**
+     * Posts an [event] to all matching event handlers registered on this [Bus].
+     *
+     * Handlers are invoked in descending [EventHandler.priority] order. If a handler
+     * throws, the failure is routed to any matching `@ExceptionHandler` methods;
+     * dispatch then continues unless an exception handler itself throws.
+     *
+     * ## Cancellation Semantics
+     *
+     * If the event implements [Cancelable], its cancellation state is interpreted
+     * according to [CancelMode.RESPECT].
+     *
+     * ## Exception Handling
+     *
+     * If an event handler throws, exception dispatch follows the rules defined by
+     * `@ExceptionHandler`:
+     *
+     * - matching handlers are invoked in descending priority and specificity,
+     * - if no handler processes the throwable:
+     *     - `Exception` (and subclasses) are logged and swallowed,
+     *     - non-`Exception` throwables (e.g., `Error`) are rethrown.
+     *
+     * Exceptions thrown *by exception handlers themselves* are not re-routed and will
+     * propagate out of this function.
+     *
+     * @param event the event instance to dispatch.
+     */
+    fun post(event: Event) = post(event, CancelMode.RESPECT)
 }
