@@ -438,8 +438,8 @@ internal class EventManager : Bus {
          *
          * 2. **Record handler ownership** in either:
          *
-         *     - [objectMap] — when [any] is non-null (instance subscriber), or
-         *     - [staticMap] — when [type] is non-null (static subscriber class).
+         *     - [objectCache] — when [any] is non-null (instance subscriber), or
+         *     - [staticCache] — when [type] is non-null (static subscriber class).
          *
          *    Only one of [any] or [type] should be provided for any call.
          *
@@ -465,9 +465,9 @@ internal class EventManager : Bus {
          * after completing all registration work.
          *
          * @param T the handler entry type (e.g. [EventHandlerEntry], [ExceptionHandlerEntry]).
-         * @param methodCache map from event type to the mutable list of handlers associated with it.
-         * @param objectMap Caffeine cache tracking which event types an instance subscriber owns handlers for.
-         * @param staticMap map tracking which event types a static subscriber class owns handlers for.
+         * @param methodCache cache from event type to the mutable list of handlers associated with it.
+         * @param objectCache Caffeine cache tracking which event types an instance subscriber owns handlers for.
+         * @param staticCache cache tracking which event types a static subscriber class owns handlers for.
          * @param eventClass the event type under which this handler should be registered.
          * @param priority the handler’s priority; higher values are ordered earlier.
          * @param handlerEntry the fully constructed handler entry.
@@ -475,17 +475,16 @@ internal class EventManager : Bus {
          * @param type static subscriber class, or `null` if registering an instance handler.
          */
         private fun <T: Priority> sharedSubscribeLogic(
-            methodCache: MutableMap<Class<out Event>,
-                    MutableList<T>>,
-            objectMap: Cache<Any, MutableList<Class<out Event>>>,
-            staticMap: MutableMap<Class<*>, MutableList<Class<out Event>>>,
+            methodCache: Cache<Class<out Event>, List<T>>,
+            objectCache: Cache<Any, List<Class<out Event>>>,
+            staticCache: Cache<Class<*>, List<Class<out Event>>>,
             eventClass: Class<out Event>,
             priority: Int,
             handlerEntry: T,
             any: Any? = null,
             type: Class<*>? = null
         ) {
-            val list = methodCache.getOrPut(eventClass) { mutableListOf() }
+            val list = methodCache.get(eventClass) { emptyList() }.toMutableList()
 
             val index = list.indexOfFirst { it.priority < priority }
             if (index == -1) {
@@ -493,16 +492,17 @@ internal class EventManager : Bus {
             } else {
                 list.add(index, handlerEntry)
             }
+            methodCache.put(eventClass, list)
             any?.let {
-                val list = objectMap.getIfPresent(it)
-                    ?: mutableListOf<Class<out Event>>().also { newList ->
-                        objectMap.put(it, newList)
-                    }
+                val list = objectCache.getIfPresent(it)?.toMutableList() ?: mutableListOf()
                 list.add(eventClass)
+                objectCache.put(it, list)
                 return
             }
             type?.let {
-                staticMap.getOrPut(it) { mutableListOf() }.add(eventClass)
+                val list = staticCache.get(it) { emptyList() }.toMutableList()
+                list.add(eventClass)
+                staticCache.put(it, list)
             }
         }
         /**
@@ -561,35 +561,37 @@ internal class EventManager : Bus {
      *
      * Handlers are stored in priority order (highest first).
      */
-    private val eventMethodCache: MutableMap<Class<out Event>, MutableList<EventHandlerEntry>> = mutableMapOf()
+    private val eventMethodCache = Caffeine.newBuilder().build<Class<out Event>, List<EventHandlerEntry>>()
     /**
      * Tracks which event types each subscriber object handles.
      *
      * Keys are weak references, allowing automatic cleanup when subscribers
      * become unreachable.
      */
-    private val objectEventMap = Caffeine.newBuilder()
+    private val objectEventCache = Caffeine.newBuilder()
         .weakKeys()
-        .removalListener<Any, MutableList<Class<out Event>>> { _, events, _ ->
+        .removalListener<Any, List<Class<out Event>>> { _, events, _ ->
             if (events != null) {
                 synchronized(lock) {
                     var hasRemovedAnything = false
                     for (eventClass in events) {
-                        eventMethodCache[eventClass]?.removeIf { handler ->
+                        val list = eventMethodCache.getIfPresent(eventClass)?.toMutableList()
+                        list?.removeIf { handler ->
                             val condition = handler is InstanceEventHandlerEntry && handler.target.get() == null
                             if (condition) hasRemovedAnything = true
                             condition
                         }
+                        list?.let { eventMethodCache.put(eventClass, it) }
                     }
-                    if (hasRemovedAnything) resolvedEventCache.clear()
+                    if (hasRemovedAnything) resolvedEventCache.invalidateAll()
                 }
             }
         }
-        .build<Any, MutableList<Class<out Event>>>()
+        .build<Any, List<Class<out Event>>>()
     /**
      * Tracks which event types each static subscriber class handles.
      *
-     * Unlike [objectEventMap], this map stores strong references to subscriber
+     * Unlike [objectEventCache], this cache stores strong references to subscriber
      * classes rather than instances. Static handlers do not participate in
      * garbage-collection–based cleanup and must be explicitly removed via
      * [unsubscribeStatic].
@@ -598,14 +600,14 @@ internal class EventManager : Bus {
      * (or `@JvmStatic` in Kotlin companions) methods annotated with [EventHandler],
      * and the associated value lists all event types that the class handles.
      */
-    private val staticEventMap: MutableMap<Class<*>, MutableList<Class<out Event>>> = mutableMapOf()
+    private val staticEventCache = Caffeine.newBuilder().build<Class<*>, List<Class<out Event>>>()
     /**
      * Cache of fully resolved handler lists for each event class.
      *
      * Resolved lists include handlers for superclasses and interfaces of
      * the event type, allowing polymorphic event dispatch.
      */
-    private val resolvedEventCache: MutableMap<Class<out Event>, List<EventHandlerEntry>> = mutableMapOf()
+    private val resolvedEventCache = Caffeine.newBuilder().build<Class<out Event>, List<EventHandlerEntry>>()
     /**
      * Maps each event type to its registered exception handlers.
      *
@@ -617,7 +619,7 @@ internal class EventManager : Bus {
      *
      * Handlers are stored in priority order (highest first).
      */
-    private val exceptionMethodCache: MutableMap<Class<out Event>, MutableList<ExceptionHandlerEntry>> = mutableMapOf()
+    private val exceptionMethodCache = Caffeine.newBuilder().build<Class<out Event>, List<ExceptionHandlerEntry>>()
     /**
      * Tracks which event types each subscriber object has exception handlers for.
      *
@@ -626,27 +628,29 @@ internal class EventManager : Bus {
      * event types under which this subscriber's exception handlers were
      * registered in [exceptionMethodCache].
      *
-     * This mirrors [objectEventMap], but for `@ExceptionHandler` methods.
+     * This mirrors [objectEventCache], but for `@ExceptionHandler` methods.
      */
-    private val objectExceptionMap = Caffeine.newBuilder()
+    private val objectExceptionCache = Caffeine.newBuilder()
         .weakKeys()
-        .removalListener<Any, MutableList<Class<out Event>>> { _, events, _ ->
+        .removalListener<Any, List<Class<out Event>>> { _, events, _ ->
             if (events != null) {
                 synchronized(lock) {
                     var hasRemovedAnything = false
                     for (eventClass in events) {
-                        exceptionMethodCache[eventClass]?.removeIf { entry ->
+                        val list = exceptionMethodCache.getIfPresent(eventClass)?.toMutableList()
+                        list?.removeIf { entry ->
                             val shouldRemove = (entry is InstanceExceptionHandlerEntry && entry.target.get() == null) ||
                                     (entry is InstanceExceptionHandlerEntryWithThrowable && entry.target.get() == null)
                             if (shouldRemove) hasRemovedAnything = true
                             shouldRemove
                         }
+                        list?.let { exceptionMethodCache.put(eventClass, it) }
                     }
-                    if (hasRemovedAnything) exceptionResolvedCache.clear()
+                    if (hasRemovedAnything) exceptionResolvedCache.invalidateAll()
                 }
             }
         }
-        .build<Any, MutableList<Class<out Event>>>()
+        .build<Any, List<Class<out Event>>>()
     /**
      * Tracks which event types each static subscriber class has exception
      * handlers for.
@@ -656,9 +660,9 @@ internal class EventManager : Bus {
      * associated value lists all event types for which that class has
      * exception handlers registered in [exceptionMethodCache].
      *
-     * This mirrors [staticEventMap], but for exception handlers.
+     * This mirrors [staticEventCache], but for exception handlers.
      */
-    private val staticExceptionMap: MutableMap<Class<*>, MutableList<Class<out Event>>> = mutableMapOf()
+    private val staticExceptionCache = Caffeine.newBuilder().build<Class<*>, List<Class<out Event>>>()
     /**
      * Cache of fully resolved exception handler lists for each event class.
      *
@@ -668,11 +672,11 @@ internal class EventManager : Bus {
      *
      * This mirrors [resolvedEventCache], but for `@ExceptionHandler` methods.
      */
-    private val exceptionResolvedCache: MutableMap<Class<out Event>, List<ExceptionHandlerEntry>> = mutableMapOf()
+    private val exceptionResolvedCache = Caffeine.newBuilder().build<Class<out Event>, List<ExceptionHandlerEntry>>()
 
     override fun subscribe(any: Any) {
         synchronized(lock) {
-            if (objectEventMap.getIfPresent(any) != null || objectExceptionMap.getIfPresent(any) != null) return
+            if (objectEventCache.getIfPresent(any) != null || objectExceptionCache.getIfPresent(any) != null) return
 
             val klass = any::class.java
 
@@ -697,9 +701,9 @@ internal class EventManager : Bus {
                 val eventHandlerAnnotation = method.getAnnotation(EventHandler::class.java)
                 val handler = InstanceEventHandlerEntry(WeakReference(any), instanceInvoker, eventHandlerAnnotation.priority, eventHandlerAnnotation.runIfCanceled)
 
-                sharedSubscribeLogic(eventMethodCache, objectEventMap, staticEventMap, eventClass, eventHandlerAnnotation.priority, handler, any)
+                sharedSubscribeLogic(eventMethodCache, objectEventCache, staticEventCache, eventClass, eventHandlerAnnotation.priority, handler, any)
             }
-            resolvedEventCache.clear()
+            resolvedEventCache.invalidateAll()
 
             for (method in methods) {
                 if (!method.isValidExceptionHandler()) continue
@@ -723,31 +727,34 @@ internal class EventManager : Bus {
                         is StaticExceptionInvokers -> continue
                     }
 
-                sharedSubscribeLogic(exceptionMethodCache, objectExceptionMap, staticExceptionMap, eventClass, priority, entry, any = any)
+                sharedSubscribeLogic(exceptionMethodCache, objectExceptionCache, staticExceptionCache, eventClass, priority, entry, any = any)
             }
-            exceptionResolvedCache.clear()
+            exceptionResolvedCache.invalidateAll()
         }
     }
 
     override fun unsubscribe(any: Any) {
         synchronized(lock) {
-            val eventClasses = objectEventMap.getIfPresent(any)
+            val eventClasses = objectEventCache.getIfPresent(any)
             if (eventClasses != null) {
                 eventClasses.forEach { eventClass ->
-                    eventMethodCache[eventClass]?.removeIf {
+                    val list = eventMethodCache.getIfPresent(eventClass)?.toMutableList()
+                    list?.removeIf {
                         if (it !is InstanceEventHandlerEntry) return@removeIf false
                         val target = it.target.get()
                         target == null || target === any
                     }
+                    list?.let { eventMethodCache.put(eventClass, it) }
                 }
-                objectEventMap.invalidate(any)
-                resolvedEventCache.clear()
+                objectEventCache.invalidate(any)
+                resolvedEventCache.invalidateAll()
             }
 
-            val exceptionEventClasses = objectExceptionMap.getIfPresent(any)
+            val exceptionEventClasses = objectExceptionCache.getIfPresent(any)
             if (exceptionEventClasses != null) {
                 exceptionEventClasses.forEach { eventClass ->
-                    exceptionMethodCache[eventClass]?.removeIf {
+                    val list = exceptionMethodCache.getIfPresent(eventClass)?.toMutableList()
+                    list?.removeIf {
                         if (it is InstanceExceptionHandlerEntry) {
                             val target = it.target.get()
                             return@removeIf target == null || target === any
@@ -758,16 +765,17 @@ internal class EventManager : Bus {
                         }
                         return@removeIf false
                     }
+                    list?.let { exceptionMethodCache.put(eventClass, it) }
                 }
-                objectExceptionMap.invalidate(any)
-                exceptionResolvedCache.clear()
+                objectExceptionCache.invalidate(any)
+                exceptionResolvedCache.invalidateAll()
             }
         }
     }
 
     override fun subscribeStatic(type: Class<*>) {
         synchronized(lock) {
-            if (staticEventMap.containsKey(type) || staticExceptionMap.containsKey(type)) return
+            if (staticEventCache.getIfPresent(type) != null || staticExceptionCache.getIfPresent(type) != null) return
 
             val methods = allDeclaredMethods(type)
                 .onEach {
@@ -791,9 +799,9 @@ internal class EventManager : Bus {
 
                 val handler = StaticEventHandlerEntry(type, staticInvoker, eventHandlerAnnotation.priority, eventHandlerAnnotation.runIfCanceled)
 
-                sharedSubscribeLogic(eventMethodCache, objectEventMap, staticEventMap, eventClass, eventHandlerAnnotation.priority, handler, type = type)
+                sharedSubscribeLogic(eventMethodCache, objectEventCache, staticEventCache, eventClass, eventHandlerAnnotation.priority, handler, type = type)
             }
-            resolvedEventCache.clear()
+            resolvedEventCache.invalidateAll()
 
             for (method in methods) {
                 if (!method.isValidExceptionHandler(allowStatic = true)) continue
@@ -816,35 +824,39 @@ internal class EventManager : Bus {
                         }
                         is InstanceExceptionInvokers -> continue
                     }
-                sharedSubscribeLogic(exceptionMethodCache, objectExceptionMap, staticExceptionMap, eventClass, priority, entry, type = type)
+                sharedSubscribeLogic(exceptionMethodCache, objectExceptionCache, staticExceptionCache, eventClass, priority, entry, type = type)
             }
-            exceptionResolvedCache.clear()
+            exceptionResolvedCache.invalidateAll()
         }
     }
 
     override fun unsubscribeStatic(type: Class<*>) {
         synchronized(lock) {
-            val eventClasses = staticEventMap[type]
+            val eventClasses = staticEventCache.getIfPresent(type)
             if (eventClasses != null) {
                 eventClasses.forEach { eventClass ->
-                    eventMethodCache[eventClass]?.removeIf {
+                    val list = eventMethodCache.getIfPresent(eventClass)?.toMutableList()
+                    list?.removeIf {
                         it is StaticEventHandlerEntry && it.owner == type
                     }
+                    list?.let { eventMethodCache.put(eventClass, it) }
                 }
-                staticEventMap.remove(type)
-                resolvedEventCache.clear()
+                staticEventCache.invalidate(type)
+                resolvedEventCache.invalidateAll()
             }
 
-            val exceptionEventClasses = staticExceptionMap[type]
+            val exceptionEventClasses = staticExceptionCache.getIfPresent(type)
             if (exceptionEventClasses != null) {
                 exceptionEventClasses.forEach { eventClass ->
-                    exceptionMethodCache[eventClass]?.removeIf {
+                    val list = exceptionMethodCache.getIfPresent(eventClass)?.toMutableList()
+                    list?.removeIf {
                         (it is StaticExceptionHandlerEntry && it.owner == type) ||
                                 (it is StaticExceptionHandlerEntryWithThrowable && it.owner == type)
                     }
+                    list?.let { exceptionMethodCache.put(eventClass, it) }
                 }
-                staticExceptionMap.remove(type)
-                exceptionResolvedCache.clear()
+                staticExceptionCache.invalidate(type)
+                exceptionResolvedCache.invalidateAll()
             }
         }
     }
@@ -854,12 +866,9 @@ internal class EventManager : Bus {
 
         if (cancelMode == CancelMode.ENFORCE && cancelable?.canceled == true) return
 
-        val handlers = synchronized(lock) {
-            val eventClass = event::class.java
-            resolvedEventCache[eventClass]
-                ?: collectHandlersFor(eventClass, eventMethodCache)
-                    .sortedByDescending { it.priority }
-                    .also { resolvedEventCache[eventClass] = it }
+        val eventClass = event::class.java
+        val handlers = resolvedEventCache.get(eventClass) {
+            collectHandlersFor(eventClass, eventMethodCache).sortedByDescending { it.priority }
         }
         for (handler in handlers) {
             if (cancelable?.canceled == true) {
@@ -896,7 +905,7 @@ internal class EventManager : Bus {
      *  - event handlers ([EventHandlerEntry])
      *  - exception handlers ([ExceptionHandlerEntry])
      *
-     * as long as they are stored in a `Map<Class<out Event>, MutableList<T>>` keyed
+     * as long as they are stored in a `Cache<Class<out Event>, MutableList<T>>` keyed
      * by the event type for which they apply.
      *
      * Typically, the returned list is then sorted by priority and cached in a
@@ -905,12 +914,12 @@ internal class EventManager : Bus {
      *
      * @param T the handler entry type, such as [EventHandlerEntry] or [ExceptionHandlerEntry].
      * @param eventClass the concrete event type being dispatched.
-     * @param methodCache the map from event type to handler lists from which entries
+     * @param methodCache the cache from event type to handler lists from which entries
      *                    should be collected.
      * @return a combined list of handlers applicable to [eventClass] and all of its
      *         relevant supertypes and interfaces.
      */
-    private fun <T> collectHandlersFor(eventClass: Class<out Event>, methodCache: Map<Class<out Event>, MutableList<T>>): List<T> {
+    private fun <T> collectHandlersFor(eventClass: Class<out Event>, methodCache: Cache<Class<out Event>, List<T>>): List<T> {
         val result = mutableListOf<T>()
         val seen = mutableSetOf<Class<*>>()
         val queue = ArrayDeque<Class<*>>()
@@ -922,7 +931,7 @@ internal class EventManager : Bus {
             if (!seen.add(current)) continue
 
             @Suppress("UNCHECKED_CAST")
-            val eventHandlerEntries: List<T>? = methodCache[current as Class<out Event>]
+            val eventHandlerEntries: List<T>? = methodCache.getIfPresent(current as Class<out Event>)
             if (eventHandlerEntries != null) result.addAll(eventHandlerEntries)
 
             current.superclass
@@ -983,17 +992,13 @@ internal class EventManager : Bus {
      * @param throwable the exception thrown while dispatching [event].
      */
     private fun dispatchExceptionHandlers(event: Event, throwable: Throwable) {
-        val handlers = synchronized(lock) {
-            val eventClass = event::class.java
-            exceptionResolvedCache[eventClass]
-                ?: collectHandlersFor(eventClass, exceptionMethodCache)
-                    .sortedWith(
-                        compareByDescending<ExceptionHandlerEntry> { it.priority }
-                            .thenBy { it.specificityRank() }
-                    )
-                    .also { exceptionResolvedCache[eventClass] = it }
+        val eventClass = event::class.java
+        val handlers = exceptionResolvedCache.get(eventClass) {
+            collectHandlersFor(eventClass, exceptionMethodCache).sortedWith(
+                compareByDescending<ExceptionHandlerEntry> { it.priority }
+                    .thenBy { it.specificityRank() }
+            )
         }
-
 
         if (handlers.isEmpty()) {
             if (throwable is Exception) {
