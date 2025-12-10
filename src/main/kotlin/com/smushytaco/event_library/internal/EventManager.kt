@@ -772,13 +772,7 @@ internal class EventManager : Bus {
             if (staticEventCache.getIfPresent(type) != null || staticExceptionCache.getIfPresent(type) != null) return
 
             val methods = allDeclaredMethods(type)
-                .onEach {
-                    try {
-                        it.isAccessible = true
-                    } catch (e: Exception) {
-                        logger.error("Failed to make static handler ${it.name} accessible.", e)
-                    }
-                }
+                .onEach { if (!it.trySetAccessible()) logger.error("Failed to make static handler ${it.name} accessible.") }
                 .toList()
 
             for (method in methods) {
