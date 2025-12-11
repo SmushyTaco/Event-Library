@@ -63,6 +63,37 @@ internal class EventManager : Bus {
          */
         private val logger = LoggerFactory.getLogger(EventManager::class.java)
         /**
+         * Global cache of compiled event handler invokers, keyed by the reflective
+         * [Method] they were generated from.
+         *
+         * This cache ensures that each handler method pays the `LambdaMetafactory`
+         * cost at most once per JVM / classloader. Subsequent subscriptions that
+         * discover an equal [Method] (same declaring class, name and parameter
+         * types) will reuse the existing [EventInvoker] rather than generating a
+         * new lambda class.
+         *
+         * The cache is stored in the companion object so that all [EventManager]
+         * instances share the same invokers. Keys and values are held strongly,
+         * which is appropriate for typical single-classloader applications where
+         * handler classes live for the lifetime of the process.
+         */
+        private val eventInvokerCache = Caffeine.newBuilder().build<Method, EventInvoker>()
+        /**
+         * Global cache of compiled exception handler invokers, keyed by the
+         * reflective [Method] they were generated from.
+         *
+         * As with [eventInvokerCache], this avoids repeatedly invoking
+         * `LambdaMetafactory` for the same `@ExceptionHandler` method. Once an
+         * [ExceptionInvoker] has been created for a given [Method], all subsequent
+         * subscriptions that discover an equal method will reuse the same invoker.
+         *
+         * The cache is shared across all [EventManager] instances via the
+         * companion object. Entries are strongly referenced, which trades a small,
+         * bounded amount of memory for predictable, minimal overhead when wiring
+         * exception handlers.
+         */
+        private val exceptionInvokerCache = Caffeine.newBuilder().build<Method, ExceptionInvoker?>()
+        /**
          * Validates whether a method qualifies as an event handler.
          *
          * Conditions:
@@ -157,47 +188,49 @@ internal class EventManager : Bus {
          * @return a compiled or reflective invoker that calls the handler.
          */
         private fun createEventInvoker(method: Method): EventInvoker {
-            val isStatic = Modifier.isStatic(method.modifiers)
-            return try {
-                val callerLookup = MethodHandles.lookup()
-                val lookup = try {
-                    MethodHandles.privateLookupIn(method.declaringClass, callerLookup)
-                } catch (_: IllegalAccessException) {
-                    callerLookup
-                }
-                val handle = lookup.unreflect(method)
-                val samMethodType = if (isStatic) {
-                    MethodType.methodType(Void.TYPE, Event::class.java)
-                } else {
-                    MethodType.methodType(Void.TYPE, Any::class.java, Event::class.java)
-                }
-                val invokedType = MethodType.methodType(if (isStatic) StaticEventInvoker::class.java else InstanceEventInvoker::class.java)
-                val implMethodType = handle.type()
-
-                val callSite = LambdaMetafactory.metafactory(
-                    lookup,
-                    "invoke",
-                    invokedType,
-                    samMethodType,
-                    handle,
-                    implMethodType
-                )
-
-                val factory = callSite.target
-                if (isStatic) {
-                    factory.invokeExact() as StaticEventInvoker
-                } else {
-                    factory.invokeExact() as InstanceEventInvoker
-                }
-            } catch (t: Throwable) {
-                logger.warn("Failed to create lambda invoker for ${method.declaringClass.name}#${method.name}, falling back to reflection.", t)
-                if (isStatic) {
-                    StaticEventInvoker { event ->
-                        method.invoke(null, event)
+            return eventInvokerCache.get(method) { methodTwo ->
+                val isStatic = Modifier.isStatic(methodTwo.modifiers)
+                return@get try {
+                    val callerLookup = MethodHandles.lookup()
+                    val lookup = try {
+                        MethodHandles.privateLookupIn(methodTwo.declaringClass, callerLookup)
+                    } catch (_: IllegalAccessException) {
+                        callerLookup
                     }
-                } else {
-                    InstanceEventInvoker { target, event ->
-                        method.invoke(target, event)
+                    val handle = lookup.unreflect(methodTwo)
+                    val samMethodType = if (isStatic) {
+                        MethodType.methodType(Void.TYPE, Event::class.java)
+                    } else {
+                        MethodType.methodType(Void.TYPE, Any::class.java, Event::class.java)
+                    }
+                    val invokedType = MethodType.methodType(if (isStatic) StaticEventInvoker::class.java else InstanceEventInvoker::class.java)
+                    val implMethodType = handle.type()
+
+                    val callSite = LambdaMetafactory.metafactory(
+                        lookup,
+                        "invoke",
+                        invokedType,
+                        samMethodType,
+                        handle,
+                        implMethodType
+                    )
+
+                    val factory = callSite.target
+                    if (isStatic) {
+                        factory.invokeExact() as StaticEventInvoker
+                    } else {
+                        factory.invokeExact() as InstanceEventInvoker
+                    }
+                } catch (t: Throwable) {
+                    logger.warn("Failed to create lambda invoker for ${methodTwo.declaringClass.name}#${methodTwo.name}, falling back to reflection.", t)
+                    if (isStatic) {
+                        StaticEventInvoker { event ->
+                            methodTwo.invoke(null, event)
+                        }
+                    } else {
+                        InstanceEventInvoker { target, event ->
+                            methodTwo.invoke(target, event)
+                        }
                     }
                 }
             }
@@ -243,179 +276,181 @@ internal class EventManager : Bus {
          *         is not a valid exception handler.
          */
         private fun createExceptionInvoker(method: Method): ExceptionInvoker? {
-            val isStatic = Modifier.isStatic(method.modifiers)
-            val kind = method.exceptionSignatureKind ?: return null
+            return exceptionInvokerCache.get(method) { methodTwo ->
+                val isStatic = Modifier.isStatic(methodTwo.modifiers)
+                val kind = methodTwo.exceptionSignatureKind ?: return@get null
 
-            return try {
-                val callerLookup = MethodHandles.lookup()
-                val lookup = try {
-                    MethodHandles.privateLookupIn(method.declaringClass, callerLookup)
-                } catch (_: IllegalAccessException) {
-                    callerLookup
-                }
-
-                val handle = lookup.unreflect(method)
-                val implMethodType = handle.type()
-
-                when (kind) {
-                    ExceptionSignatureKind.EVENT_AND_THROWABLE -> {
-                        if (isStatic) {
-                            val samMethodType = MethodType.methodType(
-                                Void.TYPE,
-                                Event::class.java,
-                                Throwable::class.java
-                            )
-                            val invokedType = MethodType.methodType(StaticExceptionInvoker::class.java)
-
-                            val callSite = LambdaMetafactory.metafactory(
-                                lookup,
-                                "invoke",
-                                invokedType,
-                                samMethodType,
-                                handle,
-                                implMethodType
-                            )
-                            val factory = callSite.target
-                            factory.invokeExact() as StaticExceptionInvoker
-                        } else {
-                            val samMethodType = MethodType.methodType(
-                                Void.TYPE,
-                                Any::class.java,
-                                Event::class.java,
-                                Throwable::class.java
-                            )
-                            val invokedType = MethodType.methodType(InstanceExceptionInvoker::class.java)
-
-                            val callSite = LambdaMetafactory.metafactory(
-                                lookup,
-                                "invoke",
-                                invokedType,
-                                samMethodType,
-                                handle,
-                                implMethodType
-                            )
-                            val factory = callSite.target
-                            factory.invokeExact() as InstanceExceptionInvoker
-                        }
+                return@get try {
+                    val callerLookup = MethodHandles.lookup()
+                    val lookup = try {
+                        MethodHandles.privateLookupIn(methodTwo.declaringClass, callerLookup)
+                    } catch (_: IllegalAccessException) {
+                        callerLookup
                     }
 
-                    ExceptionSignatureKind.EVENT_ONLY -> {
-                        if (isStatic) {
-                            val samMethodType = MethodType.methodType(
-                                Void.TYPE,
-                                Event::class.java
-                            )
-                            val invokedType = MethodType.methodType(StaticExceptionEventOnlyInvoker::class.java)
+                    val handle = lookup.unreflect(methodTwo)
+                    val implMethodType = handle.type()
 
-                            val callSite = LambdaMetafactory.metafactory(
-                                lookup,
-                                "invoke",
-                                invokedType,
-                                samMethodType,
-                                handle,
-                                implMethodType
-                            )
-                            val factory = callSite.target
-                            factory.invokeExact() as StaticExceptionEventOnlyInvoker
-                        } else {
-                            val samMethodType = MethodType.methodType(
-                                Void.TYPE,
-                                Any::class.java,
-                                Event::class.java
-                            )
-                            val invokedType = MethodType.methodType(InstanceExceptionEventOnlyInvoker::class.java)
+                    when (kind) {
+                        ExceptionSignatureKind.EVENT_AND_THROWABLE -> {
+                            if (isStatic) {
+                                val samMethodType = MethodType.methodType(
+                                    Void.TYPE,
+                                    Event::class.java,
+                                    Throwable::class.java
+                                )
+                                val invokedType = MethodType.methodType(StaticExceptionInvoker::class.java)
 
-                            val callSite = LambdaMetafactory.metafactory(
-                                lookup,
-                                "invoke",
-                                invokedType,
-                                samMethodType,
-                                handle,
-                                implMethodType
-                            )
-                            val factory = callSite.target
-                            factory.invokeExact() as InstanceExceptionEventOnlyInvoker
-                        }
-                    }
+                                val callSite = LambdaMetafactory.metafactory(
+                                    lookup,
+                                    "invoke",
+                                    invokedType,
+                                    samMethodType,
+                                    handle,
+                                    implMethodType
+                                )
+                                val factory = callSite.target
+                                factory.invokeExact() as StaticExceptionInvoker
+                            } else {
+                                val samMethodType = MethodType.methodType(
+                                    Void.TYPE,
+                                    Any::class.java,
+                                    Event::class.java,
+                                    Throwable::class.java
+                                )
+                                val invokedType = MethodType.methodType(InstanceExceptionInvoker::class.java)
 
-                    ExceptionSignatureKind.THROWABLE_ONLY -> {
-                        if (isStatic) {
-                            val samMethodType = MethodType.methodType(
-                                Void.TYPE,
-                                Throwable::class.java
-                            )
-                            val invokedType = MethodType.methodType(StaticExceptionThrowableOnlyInvoker::class.java)
-
-                            val callSite = LambdaMetafactory.metafactory(
-                                lookup,
-                                "invoke",
-                                invokedType,
-                                samMethodType,
-                                handle,
-                                implMethodType
-                            )
-                            val factory = callSite.target
-                            factory.invokeExact() as StaticExceptionThrowableOnlyInvoker
-                        } else {
-                            val samMethodType = MethodType.methodType(
-                                Void.TYPE,
-                                Any::class.java,
-                                Throwable::class.java
-                            )
-                            val invokedType = MethodType.methodType(InstanceExceptionThrowableOnlyInvoker::class.java)
-
-                            val callSite = LambdaMetafactory.metafactory(
-                                lookup,
-                                "invoke",
-                                invokedType,
-                                samMethodType,
-                                handle,
-                                implMethodType
-                            )
-                            val factory = callSite.target
-                            factory.invokeExact() as InstanceExceptionThrowableOnlyInvoker
-                        }
-                    }
-                }
-            } catch (t: Throwable) {
-                logger.warn(
-                    "Failed to create lambda exception invoker for ${method.declaringClass.name}#${method.name}, falling back to reflection.",
-                    t
-                )
-
-                when (kind) {
-                    ExceptionSignatureKind.EVENT_AND_THROWABLE -> {
-                        if (isStatic) {
-                            StaticExceptionInvoker { event, throwable ->
-                                method.invoke(null, event, throwable)
+                                val callSite = LambdaMetafactory.metafactory(
+                                    lookup,
+                                    "invoke",
+                                    invokedType,
+                                    samMethodType,
+                                    handle,
+                                    implMethodType
+                                )
+                                val factory = callSite.target
+                                factory.invokeExact() as InstanceExceptionInvoker
                             }
-                        } else {
-                            InstanceExceptionInvoker { target, event, throwable ->
-                                method.invoke(target, event, throwable)
+                        }
+
+                        ExceptionSignatureKind.EVENT_ONLY -> {
+                            if (isStatic) {
+                                val samMethodType = MethodType.methodType(
+                                    Void.TYPE,
+                                    Event::class.java
+                                )
+                                val invokedType = MethodType.methodType(StaticExceptionEventOnlyInvoker::class.java)
+
+                                val callSite = LambdaMetafactory.metafactory(
+                                    lookup,
+                                    "invoke",
+                                    invokedType,
+                                    samMethodType,
+                                    handle,
+                                    implMethodType
+                                )
+                                val factory = callSite.target
+                                factory.invokeExact() as StaticExceptionEventOnlyInvoker
+                            } else {
+                                val samMethodType = MethodType.methodType(
+                                    Void.TYPE,
+                                    Any::class.java,
+                                    Event::class.java
+                                )
+                                val invokedType = MethodType.methodType(InstanceExceptionEventOnlyInvoker::class.java)
+
+                                val callSite = LambdaMetafactory.metafactory(
+                                    lookup,
+                                    "invoke",
+                                    invokedType,
+                                    samMethodType,
+                                    handle,
+                                    implMethodType
+                                )
+                                val factory = callSite.target
+                                factory.invokeExact() as InstanceExceptionEventOnlyInvoker
+                            }
+                        }
+
+                        ExceptionSignatureKind.THROWABLE_ONLY -> {
+                            if (isStatic) {
+                                val samMethodType = MethodType.methodType(
+                                    Void.TYPE,
+                                    Throwable::class.java
+                                )
+                                val invokedType = MethodType.methodType(StaticExceptionThrowableOnlyInvoker::class.java)
+
+                                val callSite = LambdaMetafactory.metafactory(
+                                    lookup,
+                                    "invoke",
+                                    invokedType,
+                                    samMethodType,
+                                    handle,
+                                    implMethodType
+                                )
+                                val factory = callSite.target
+                                factory.invokeExact() as StaticExceptionThrowableOnlyInvoker
+                            } else {
+                                val samMethodType = MethodType.methodType(
+                                    Void.TYPE,
+                                    Any::class.java,
+                                    Throwable::class.java
+                                )
+                                val invokedType = MethodType.methodType(InstanceExceptionThrowableOnlyInvoker::class.java)
+
+                                val callSite = LambdaMetafactory.metafactory(
+                                    lookup,
+                                    "invoke",
+                                    invokedType,
+                                    samMethodType,
+                                    handle,
+                                    implMethodType
+                                )
+                                val factory = callSite.target
+                                factory.invokeExact() as InstanceExceptionThrowableOnlyInvoker
                             }
                         }
                     }
+                } catch (t: Throwable) {
+                    logger.warn(
+                        "Failed to create lambda exception invoker for ${methodTwo.declaringClass.name}#${methodTwo.name}, falling back to reflection.",
+                        t
+                    )
 
-                    ExceptionSignatureKind.EVENT_ONLY -> {
-                        if (isStatic) {
-                            StaticExceptionEventOnlyInvoker { event ->
-                                method.invoke(null, event)
-                            }
-                        } else {
-                            InstanceExceptionEventOnlyInvoker { target, event ->
-                                method.invoke(target, event)
+                    when (kind) {
+                        ExceptionSignatureKind.EVENT_AND_THROWABLE -> {
+                            if (isStatic) {
+                                StaticExceptionInvoker { event, throwable ->
+                                    methodTwo.invoke(null, event, throwable)
+                                }
+                            } else {
+                                InstanceExceptionInvoker { target, event, throwable ->
+                                    methodTwo.invoke(target, event, throwable)
+                                }
                             }
                         }
-                    }
 
-                    ExceptionSignatureKind.THROWABLE_ONLY -> {
-                        if (isStatic) {
-                            StaticExceptionThrowableOnlyInvoker { throwable ->
-                                method.invoke(null, throwable)
+                        ExceptionSignatureKind.EVENT_ONLY -> {
+                            if (isStatic) {
+                                StaticExceptionEventOnlyInvoker { event ->
+                                    methodTwo.invoke(null, event)
+                                }
+                            } else {
+                                InstanceExceptionEventOnlyInvoker { target, event ->
+                                    methodTwo.invoke(target, event)
+                                }
                             }
-                        } else {
-                            InstanceExceptionThrowableOnlyInvoker { target, throwable ->
-                                method.invoke(target, throwable)
+                        }
+
+                        ExceptionSignatureKind.THROWABLE_ONLY -> {
+                            if (isStatic) {
+                                StaticExceptionThrowableOnlyInvoker { throwable ->
+                                    methodTwo.invoke(null, throwable)
+                                }
+                            } else {
+                                InstanceExceptionThrowableOnlyInvoker { target, throwable ->
+                                    methodTwo.invoke(target, throwable)
+                                }
                             }
                         }
                     }

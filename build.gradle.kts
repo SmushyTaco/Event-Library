@@ -9,6 +9,7 @@ plugins {
 	alias(libs.plugins.yumiGradleLicenser)
 	alias(libs.plugins.dotenv)
 	alias(libs.plugins.nmcp)
+	alias(libs.plugins.jmh)
 }
 
 val projectName = providers.gradleProperty("name")
@@ -43,6 +44,14 @@ dependencies {
 	testRuntimeOnly(libs.slf4j.simple)
 	testImplementation(kotlin("test"))
 	testImplementation(libs.junit.jupiter)
+	jmhRuntimeOnly(libs.slf4j.simple)
+	jmhImplementation(libs.guava)
+	jmhImplementation(libs.mbassador)
+	jmhImplementation(libs.greenrobotEventBus)
+}
+jmh {
+	jmhVersion = libs.versions.jmh
+	resultFormat = "JSON"
 }
 java {
 	toolchain {

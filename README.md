@@ -212,7 +212,7 @@ And the following to your `gradle/libs.versions.toml`:
 ```toml
 [versions]
 # Check this on https://central.sonatype.com/artifact/com.smushytaco/event-library/
-eventLibrary = "4.0.4"
+eventLibrary = "4.0.5"
 
 [libraries]
 eventLibrary = { group = "com.smushytaco", name = "event-library", version.ref = "eventLibrary" }
@@ -333,7 +333,7 @@ The bus calls *all* matching exception handlers (unless one of them throws), ord
 ### 1. Define an event
 
 ```kotlin
-class MessageEvent(val text: String) :
+class MessageEvent(var text: String) :
     Event,
     Cancelable by Cancelable(),
     Modifiable by Modifiable()
@@ -358,6 +358,7 @@ class MessageSubscriber {
             throw IllegalArgumentException("Boom!")
         }
 
+        event.text = "Hello!"
         event.markModified()
     }
 
@@ -403,6 +404,52 @@ Depending on the `CancelMode` you choose and how your handlers are annotated wit
 - simple, fire‑every‑handler semantics,
 - fine‑grained “some handlers still run after cancellation” pipelines, or
 - strict “first handler to cancel aborts everything” behavior.
+
+---
+
+## ⚡ Benchmarks
+
+This library was benchmarked against the most popular JVM event buses using **JMH (Java Microbenchmark Harness)**.
+Tests were performed on JDK 17 (OpenJDK 64-Bit Server VM).
+
+### 🚀 Throughput (Higher is Better)
+*Operations per microsecond (ops/µs)*
+
+In concurrent scenarios, `Event-Library` scales almost linearly, while competitors suffer from lock contention and degrade in performance.
+
+| Library           | 1 Thread | 4 Threads | 8 Threads |
+|:------------------|:---------|:----------|:----------|
+| **Event Library** | **49.3** | **130.2** | **361.4** |
+| GreenRobot        | 18.9     | 15.2      | 5.1       |
+| Guava             | 11.2     | 8.4       | 7.4       |
+| MBassador         | 4.9      | 2.2       | 2.1       |
+
+> **Note:** At 8 threads, this library is **~70x faster** than GreenRobot, **~48x faster** than Guava, and **~170x faster** than MBassador.
+
+### ⏱️ Latency (Lower is Better)
+*Nanoseconds per operation (ns/op)*
+
+Measures the time it takes to post a single event to a single subscriber.
+
+| Benchmark          | Time (ns)    | Overhead vs Direct Call |
+|:-------------------|:-------------|:------------------------|
+| Direct Method Call | 1.15 ns      | —                       |
+| **Event Library**  | **18.63 ns** | **~17 ns**              |
+| GreenRobot         | 47.47 ns     | ~46 ns                  |
+| Guava              | 87.60 ns     | ~86 ns                  |
+| MBassador          | 203.31 ns    | ~202 ns                 |
+
+> **Note:** The dispatch latency is **~2.5x lower** than GreenRobot, **~4.7x lower** than Guava, and **~10x lower** than MBassador.
+
+### 📈 Handler Scaling
+Even with a high number of subscribers, dispatch remains incredibly fast (nanoseconds).
+
+| Handlers | Dispatch Time |
+|:---------|:--------------|
+| 1        | 20.5 ns       |
+| 4        | 23.8 ns       |
+| 16       | 33.0 ns       |
+| 64       | 90.6 ns       |
 
 ---
 
