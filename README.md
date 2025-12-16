@@ -212,7 +212,7 @@ And the following to your `gradle/libs.versions.toml`:
 ```toml
 [versions]
 # Check this on https://central.sonatype.com/artifact/com.smushytaco/event-library/
-eventLibrary = "4.0.5"
+eventLibrary = "4.0.6"
 
 [libraries]
 eventLibrary = { group = "com.smushytaco", name = "event-library", version.ref = "eventLibrary" }
