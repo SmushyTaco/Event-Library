@@ -2,7 +2,7 @@
 ##########################################################################
 # Plugins
 # Check this on https://kotlinlang.org/docs/releases.html
-kotlin = "2.2.21"
+kotlin = "2.3.0"
 # Check this on https://github.com/Kotlin/dokka/releases/latest/
 dokka = "2.1.0"
 # Check this on https://plugins.gradle.org/plugin/dev.yumi.gradle.licenser/
