@@ -201,3 +201,13 @@ interface Bus {
      */
     fun post(event: Event) = post(event, CancelMode.RESPECT)
 }
+
+/**
+ * Registers a class containing **static handler methods**.
+ *
+ * This is a convenience overload for Kotlin callers that forwards to
+ * [subscribeStatic] with [KClass].
+ *
+ * @param T the type of the Kotlin class whose static handler methods should be registered.
+ */
+inline fun <reified T> Bus.subscribeStatic() = subscribeStatic(T::class)
