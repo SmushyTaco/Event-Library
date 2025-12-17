@@ -195,6 +195,14 @@ bus.post(SomeEvent())
 bus.unsubscribeStatic(StaticHandlers::class)
 ```
 
+You can also do:
+
+```kotlin
+bus.subscribeStatic<StaticHandlers>()
+bus.post(SomeEvent())
+bus.unsubscribeStatic<StaticHandlers>()
+```
+
 Static handlers are strongly referenced and remain active until explicitly unregistered.
 
 ---
@@ -212,7 +220,7 @@ And the following to your `gradle/libs.versions.toml`:
 ```toml
 [versions]
 # Check this on https://central.sonatype.com/artifact/com.smushytaco/event-library/
-eventLibrary = "4.0.6"
+eventLibrary = "4.1.0"
 
 [libraries]
 eventLibrary = { group = "com.smushytaco", name = "event-library", version.ref = "eventLibrary" }

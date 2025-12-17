@@ -19,6 +19,7 @@ package com.smushytaco.event_library.internal
 import com.github.benmanes.caffeine.cache.Cache
 import com.github.benmanes.caffeine.cache.Caffeine
 import com.smushytaco.event_library.api.*
+import com.smushytaco.event_library.internal.EventManager.Companion.eventInvokerCache
 import com.smushytaco.event_library.internal.ExceptionSignatureKind.Companion.exceptionSignatureKind
 import com.smushytaco.event_library.internal.handlers.*
 import com.smushytaco.event_library.internal.invokers.event.EventInvoker

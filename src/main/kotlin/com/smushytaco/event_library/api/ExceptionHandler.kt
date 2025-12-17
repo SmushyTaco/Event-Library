@@ -16,6 +16,8 @@
 
 package com.smushytaco.event_library.api
 
+import com.smushytaco.event_library.api.Bus.Companion.subscribeStatic
+
 /**
  * Marks a function as an exception handler for failures that occur during
  * event dispatch.

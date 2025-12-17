@@ -17,6 +17,8 @@
 package com.smushytaco.event_library.api
 
 import com.smushytaco.event_library.api.Bus.Companion.invoke
+import com.smushytaco.event_library.api.Bus.Companion.subscribeStatic
+import com.smushytaco.event_library.api.Bus.Companion.unsubscribeStatic
 import com.smushytaco.event_library.internal.EventManager
 import kotlin.reflect.KClass
 
@@ -51,6 +53,56 @@ interface Bus {
         @JvmStatic
         @JvmName("create")
         operator fun invoke(): Bus = EventManager()
+        /**
+         * Registers all static handler methods declared on the reified type [T].
+         *
+         * This is a Kotlin convenience overload of [subscribeStatic] that allows
+         * static handlers to be registered using a reified type parameter instead
+         * of explicitly passing a [KClass] or [Class] reference.
+         *
+         * The function discovers and registers all `static` (or `@JvmStatic`)
+         * functions on [T] annotated with [EventHandler] or [ExceptionHandler]
+         * and having a supported signature.
+         *
+         * Static handlers:
+         * - do not require an instance,
+         * - are strongly referenced,
+         * - remain active until explicitly removed via [unsubscribeStatic].
+         *
+         * Calling this function more than once for the same type is a no-op.
+         *
+         * ### Example
+         *
+         * ```kotlin
+         * bus.subscribeStatic<MyStaticHandlers>()
+         * ```
+         *
+         * @param T the class containing static handler methods to register.
+         * @receiver the [Bus] to which the static handlers declared on [T] will be registered.
+         */
+        inline fun <reified T> Bus.subscribeStatic() = subscribeStatic(T::class)
+        /**
+         * Unregisters all static handler methods declared on the reified type [T].
+         *
+         * This is a Kotlin convenience overload of [unsubscribeStatic] that allows
+         * static handlers to be removed using a reified type parameter instead of
+         * explicitly passing a [KClass] or [Class] reference.
+         *
+         * Both `@EventHandler` and `@ExceptionHandler` static methods that were
+         * previously registered for [T] are removed.
+         *
+         * If the given type was not registered, this operation has no effect.
+         *
+         * ### Example
+         *
+         * ```kotlin
+         * bus.unsubscribeStatic<MyStaticHandlers>()
+         * ```
+         *
+         * @param T the class whose static handler methods should be unregistered.
+         * @receiver the [Bus] from which the static handlers declared on [T] will be removed.
+         */
+        inline fun <reified T> Bus.unsubscribeStatic() = unsubscribeStatic(T::class)
     }
     /**
      * Registers an object as a subscriber.
@@ -201,13 +253,3 @@ interface Bus {
      */
     fun post(event: Event) = post(event, CancelMode.RESPECT)
 }
-
-/**
- * Registers a class containing **static handler methods**.
- *
- * This is a convenience overload for Kotlin callers that forwards to
- * [subscribeStatic] with [KClass].
- *
- * @param T the type of the Kotlin class whose static handler methods should be registered.
- */
-inline fun <reified T> Bus.subscribeStatic() = subscribeStatic(T::class)

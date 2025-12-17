@@ -19,6 +19,8 @@
 package com.smushytaco.event_library
 
 import com.smushytaco.event_library.api.*
+import com.smushytaco.event_library.api.Bus.Companion.subscribeStatic
+import com.smushytaco.event_library.api.Bus.Companion.unsubscribeStatic
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
@@ -233,6 +235,23 @@ class StaticHandlersTest {
     }
 
     @Test
+    fun `static handler receives posted event using reified helper`() {
+        val bus = Bus()
+        val event = StaticSimpleEvent()
+
+        StaticSimpleSubscriber.reset()
+
+        bus.subscribeStatic<StaticSimpleSubscriber>()
+        bus.post(event)
+
+        assertSame(
+            event,
+            StaticSimpleSubscriber.received,
+            "Static handler should receive the exact event instance when registered via Class overload"
+        )
+    }
+
+    @Test
     fun `static handler receives posted event using KClass overload`() {
         val bus = Bus()
         val event = StaticSimpleEvent()
@@ -269,6 +288,35 @@ class StaticHandlersTest {
 
         // Unsubscribe and verify no further delivery
         bus.unsubscribeStatic(StaticSimpleSubscriber::class.java)
+        StaticSimpleSubscriber.reset()
+        bus.post(event2)
+
+        assertNull(
+            StaticSimpleSubscriber.received,
+            "Static handler should not receive events after unsubscribeStatic"
+        )
+    }
+
+    @Test
+    fun `unsubscribeStatic using reified helper stops static handlers from receiving events`() {
+        val bus = Bus()
+        val event1 = StaticSimpleEvent()
+        val event2 = StaticSimpleEvent()
+
+        StaticSimpleSubscriber.reset()
+
+        bus.subscribeStatic<StaticSimpleSubscriber>()
+        bus.post(event1)
+
+        // Verify first event is delivered
+        assertSame(
+            event1,
+            StaticSimpleSubscriber.received,
+            "Static handler should receive events before unsubscribeStatic"
+        )
+
+        // Unsubscribe and verify no further delivery
+        bus.unsubscribeStatic<StaticSimpleSubscriber>()
         StaticSimpleSubscriber.reset()
         bus.post(event2)
 

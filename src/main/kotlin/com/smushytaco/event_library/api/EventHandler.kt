@@ -16,6 +16,8 @@
 
 package com.smushytaco.event_library.api
 
+import com.smushytaco.event_library.api.Bus.Companion.subscribeStatic
+
 /**
  * Marks a function as an event handler that should be invoked when an event of the
  * appropriate type is posted to a [Bus].
