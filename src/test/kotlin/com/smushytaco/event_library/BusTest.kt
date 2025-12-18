@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-@file:Suppress("unused")
-
 package com.smushytaco.event_library
 
 import com.smushytaco.event_library.api.*
