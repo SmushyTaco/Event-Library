@@ -16,6 +16,30 @@ This library focuses on **simplicity**, **performance**, and **zero boilerplate*
 
 ---
 
+## 🧠 IntelliJ IDEA Plugin (Recommended)
+
+If you use **IntelliJ IDEA** or **Android Studio**, there is an official companion plugin I created:
+
+👉 **[Event Library Helper Plugin](https://plugins.jetbrains.com/plugin/29413-event-library-helper)**
+
+The plugin provides **IDE-time validation and quick fixes** for `@EventHandler` and `@ExceptionHandler` methods, helping you catch mistakes before runtime.
+
+You can check out the code [here](https://github.com/SmushyTaco/Event-Library-Plugin).
+
+### What the plugin does
+- ✅ Validates handler method signatures
+- ✅ Ensures correct parameter counts and types
+- ✅ Enforces `void` / `Unit` return types
+- ✅ Detects invalid `@ExceptionHandler` shapes
+- 🔁 Offers quick fixes where possible (e.g. return type correction, parameter order swaps)
+
+### Language support
+- **Kotlin**
+- **Java**
+- **Scala (Scala 3)**
+
+Using the plugin is strongly recommended when working with Event Library, especially in larger codebases, as it turns many runtime errors into immediate editor feedback.
+
 ## ✨ Features
 
 ### 🔍 Automatic Handler Discovery
